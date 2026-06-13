@@ -1,0 +1,49 @@
+import os
+from dataclasses import dataclass, field
+from pathlib import Path
+
+# Base directory
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
+
+@dataclass
+class AudioConfig:
+    SAMPLE_RATE: int = 16000
+    CHANNELS: int = 1
+    CHUNK_SIZE: int = 512
+    DTYPE: str = 'float32'
+
+@dataclass
+class VADConfig:
+    THRESHOLD: float = 0.4
+    MIN_SILENCE_DURATION_MS: int = 250
+    SPEECH_PAD_MS: int = 50
+
+@dataclass
+class LLMConfig:
+    GROQ_API_KEY: str = os.environ.get("GROQ_API_KEY", "")
+    GEMINI_API_KEY: str = os.environ.get("GEMINI_API_KEY", "")
+    PRIMARY_MODEL: str = "llama-3.3-70b-versatile"
+    FALLBACK_MODEL: str = "gemini-2.5-flash"
+
+@dataclass
+class DatabaseConfig:
+    PATH: str = str(BASE_DIR / "data" / "bmo.db")
+    VECTOR_DB_PATH: str = str(BASE_DIR / "data" / "chromadb")
+
+@dataclass
+class UIConfig:
+    WIDTH: int = 800
+    HEIGHT: int = 480
+    FPS: int = 30
+    FULLSCREEN: bool = False
+
+@dataclass
+class BmoSettings:
+    audio: AudioConfig = field(default_factory=AudioConfig)
+    vad: VADConfig = field(default_factory=VADConfig)
+    llm: LLMConfig = field(default_factory=LLMConfig)
+    db: DatabaseConfig = field(default_factory=DatabaseConfig)
+    ui: UIConfig = field(default_factory=UIConfig)
+
+# Global instance
+settings = BmoSettings()

@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BMO – Parent Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    /* ── Reset & base ────────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg:       #0f172a;
+      --surface:  #1e293b;
+      --border:   #334155;
+      --primary:  #38bdf8;
+      --success:  #4ade80;
+      --warn:     #fbbf24;
+      --danger:   #f87171;
+      --text:     #e2e8f0;
+      --muted:    #94a3b8;
+      --radius:   12px;
+    }
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    /* ── Layout ──────────────────────────────────────────────────────────── */
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 16px 32px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    header h1 { font-size: 1.4rem; font-weight: 700; color: var(--primary); }
+    header p  { font-size: 0.85rem; color: var(--muted); }
+
+    .toolbar {
+      padding: 20px 32px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+      border-bottom: 1px solid var(--border);
+    }
+    .toolbar label { color: var(--muted); font-size: 0.9rem; }
+    select, button {
+      padding: 10px 16px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text);
+      font-size: 0.9rem;
+      cursor: pointer;
+      transition: border-color 0.2s;
+    }
+    select:hover, button:hover { border-color: var(--primary); }
+    button.primary {
+      background: var(--primary);
+      color: #0f172a;
+      font-weight: 600;
+      border-color: transparent;
+    }
+
+    main {
+      padding: 28px 32px;
+      display: grid;
+      gap: 24px;
+    }
+
+    /* ── Cards ───────────────────────────────────────────────────────────── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px 24px;
+    }
+    .card h2 {
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--muted);
+      margin-bottom: 16px;
+    }
+
+    /* ── KPI strip ───────────────────────────────────────────────────────── */
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 16px;
+    }
+    .kpi {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 18px;
+      text-align: center;
+    }
+    .kpi .value  { font-size: 2rem; font-weight: 800; color: var(--primary); }
+    .kpi .label  { font-size: 0.75rem; color: var(--muted); margin-top: 4px; }
+
+    /* ── Charts grid ─────────────────────────────────────────────────────── */
+    .charts-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+      gap: 24px;
+    }
+
+    /* ── Skill bars ──────────────────────────────────────────────────────── */
+    .skill-list { display: flex; flex-direction: column; gap: 14px; }
+    .skill-row  { display: flex; flex-direction: column; gap: 6px; }
+    .skill-header {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.85rem;
+    }
+    .skill-header .domain { color: var(--text); font-weight: 600; }
+    .skill-header .level  { color: var(--muted); }
+    .bar-track {
+      height: 8px;
+      background: var(--bg);
+      border-radius: 99px;
+      overflow: hidden;
+    }
+    .bar-fill {
+      height: 100%;
+      border-radius: 99px;
+      background: linear-gradient(90deg, var(--primary), var(--success));
+      transition: width 0.6s ease;
+    }
+
+    /* ── Badge list ──────────────────────────────────────────────────────── */
+    .badge-list  { display: flex; flex-wrap: wrap; gap: 10px; }
+    .badge-chip  {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 99px;
+      padding: 6px 14px;
+      font-size: 0.8rem;
+      color: var(--primary);
+    }
+
+    /* ── Sessions table ──────────────────────────────────────────────────── */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+    }
+    th {
+      text-align: left;
+      color: var(--muted);
+      font-weight: 500;
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      color: var(--text);
+    }
+    tr:last-child td { border-bottom: none; }
+
+    /* ── Chip badge pill ─────────────────────────────────────────────────── */
+    .pill {
+      display: inline-block;
+      padding: 2px 10px;
+      border-radius: 99px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .pill.happy    { background:#14532d; color:#4ade80; }
+    .pill.neutral  { background:#1e3a5f; color:#7dd3fc; }
+    .pill.sad      { background:#1e3a8a; color:#93c5fd; }
+    .pill.angry    { background:#7f1d1d; color:#fca5a5; }
+    .pill.excited  { background:#713f12; color:#fde68a; }
+    .pill.scared   { background:#4c1d95; color:#c4b5fd; }
+
+    /* ── Empty state ─────────────────────────────────────────────────────── */
+    .empty { color: var(--muted); font-size: 0.9rem; padding: 16px 0; }
+
+    /* ── Loading ─────────────────────────────────────────────────────────── */
+    #loading {
+      display: none;
+      position: fixed; inset: 0;
+      background: rgba(15,23,42,0.7);
+      align-items: center;
+      justify-content: center;
+      font-size: 1.2rem;
+      color: var(--primary);
+      z-index: 999;
+    }
+  </style>
+</head>
+<body>
+
+<div id="loading">Loading…</div>
+
+<header>
+  <div>
+    <h1>🤖 BMO Parent Dashboard</h1>
+    <p>Monitor your child's therapy progress, emotions, and skill development.</p>
+  </div>
+</header>
+
+<div class="toolbar">
+  <label for="childSelect">Child Profile:</label>
+  <select id="childSelect" onchange="loadDashboard()">
+    <option value="">— Select a child —</option>
+    {% for p in profiles %}
+      <option value="{{ p.id }}">{{ p.name }} (Age {{ p.age }})</option>
+    {% endfor %}
+  </select>
+
+  <label for="trendDays">Period:</label>
+  <select id="trendDays" onchange="loadDashboard()">
+    <option value="7">Last 7 days</option>
+    <option value="30" selected>Last 30 days</option>
+    <option value="90">Last 90 days</option>
+  </select>
+</div>
+
+<main id="dashContent" style="display:none">
+
+  <!-- KPI row -->
+  <div class="card">
+    <h2>Overview</h2>
+    <div class="kpi-grid">
+      <div class="kpi"><div class="value" id="kpiSessions">—</div><div class="label">Sessions</div></div>
+      <div class="kpi"><div class="value" id="kpiMinutes">—</div><div class="label">Minutes Played</div></div>
+      <div class="kpi"><div class="value" id="kpiAttention">—</div><div class="label">Avg Attention %</div></div>
+      <div class="kpi"><div class="value" id="kpiSpeech">—</div><div class="label">Avg Speech %</div></div>
+      <div class="kpi"><div class="value" id="kpiFavGame">—</div><div class="label">Favourite Game</div></div>
+    </div>
+  </div>
+
+  <!-- Skill domains + emotion distribution -->
+  <div class="charts-grid">
+
+    <div class="card">
+      <h2>Skill Domain Levels</h2>
+      <div class="skill-list" id="skillList"></div>
+    </div>
+
+    <div class="card">
+      <h2>Mood Distribution (Last 7 days)</h2>
+      <canvas id="emotionChart" height="220"></canvas>
+    </div>
+
+  </div>
+
+  <!-- Progress trend -->
+  <div class="card">
+    <h2>Score Trend (Selected Period)</h2>
+    <canvas id="trendChart" height="140"></canvas>
+  </div>
+
+  <!-- Game performance + interests -->
+  <div class="charts-grid">
+
+    <div class="card">
+      <h2>Game Performance</h2>
+      <canvas id="gameChart" height="220"></canvas>
+    </div>
+
+    <div class="card">
+      <h2>Detected Interests</h2>
+      <canvas id="interestChart" height="220"></canvas>
+    </div>
+
+  </div>
+
+  <!-- Badges -->
+  <div class="card">
+    <h2>Recent Badges</h2>
+    <div class="badge-list" id="badgeList"></div>
+  </div>
+
+  <!-- Recent sessions -->
+  <div class="card">
+    <h2>Recent Sessions</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Date</th><th>Type</th><th>Duration</th>
+          <th>Attention</th><th>Speech</th>
+          <th>Mood Start</th><th>Mood End</th>
+        </tr>
+      </thead>
+      <tbody id="sessionTable"></tbody>
+    </table>
+  </div>
+
+</main>
+
+<script>
+// ── Chart instances (destroyed on reload) ────────────────────────────────────
+let emotionChart, trendChart, gameChart, interestChart;
+
+function destroyCharts() {
+  [emotionChart, trendChart, gameChart, interestChart].forEach(c => c && c.destroy());
+}
+
+// ── Pill helper ───────────────────────────────────────────────────────────────
+function pill(emotion) {
+  return `<span class="pill ${emotion || 'neutral'}">${emotion || 'neutral'}</span>`;
+}
+
+// ── Main load ─────────────────────────────────────────────────────────────────
+async function loadDashboard() {
+  const childId = document.getElementById('childSelect').value;
+  const days    = document.getElementById('trendDays').value;
+  const content = document.getElementById('dashContent');
+  if (!childId) { content.style.display = 'none'; return; }
+
+  document.getElementById('loading').style.display = 'flex';
+  destroyCharts();
+
+  try {
+    const [analytics, trend] = await Promise.all([
+      fetch(`/api/children/${childId}/analytics`).then(r => r.json()),
+      fetch(`/api/children/${childId}/trend?days=${days}`).then(r => r.json()),
+    ]);
+
+    renderKPIs(analytics.summary);
+    renderSkills(analytics.skills);
+    renderEmotionChart(analytics.emotions);
+    renderTrendChart(trend);
+    renderGameChart(analytics.games);
+    renderInterestChart(analytics.interests);
+    renderBadges(analytics.summary.recent_achievements);
+    renderSessions(analytics.sessions);
+
+    content.style.display = 'grid';
+  } catch(err) {
+    console.error('Dashboard load error', err);
+  } finally {
+    document.getElementById('loading').style.display = 'none';
+  }
+}
+
+// ── Renderers ─────────────────────────────────────────────────────────────────
+
+function renderKPIs(s) {
+  document.getElementById('kpiSessions').textContent  = s.total_sessions || 0;
+  document.getElementById('kpiMinutes').textContent   = s.total_duration_minutes || 0;
+  document.getElementById('kpiAttention').textContent = (s.avg_attention || 0) + '%';
+  document.getElementById('kpiSpeech').textContent    = (s.avg_speech || 0) + '%';
+  document.getElementById('kpiFavGame').textContent   = (s.favorite_game || '—').replace('_', ' ');
+}
+
+function renderSkills(skills) {
+  const LABELS = {
+    speech: 'Speech & Language', social: 'Social Skills',
+    emotional: 'Emotional Awareness', attention: 'Attention & Focus',
+  };
+  const el = document.getElementById('skillList');
+  el.innerHTML = '';
+  for (const [domain, label] of Object.entries(LABELS)) {
+    const data  = skills[domain] || { score: 0, skill_level: 1 };
+    const score = Math.round(data.score || 0);
+    el.innerHTML += `
+      <div class="skill-row">
+        <div class="skill-header">
+          <span class="domain">${label}</span>
+          <span class="level">Level ${data.skill_level}/5 &nbsp;·&nbsp; ${score}%</span>
+        </div>
+        <div class="bar-track"><div class="bar-fill" style="width:${score}%"></div></div>
+      </div>`;
+  }
+  if (!el.innerHTML) el.innerHTML = '<p class="empty">No skill data yet. Start a session!</p>';
+}
+
+function renderEmotionChart(dist) {
+  const labels = Object.keys(dist);
+  const data   = Object.values(dist);
+  const COLORS = {
+    happy:'#4ade80', neutral:'#7dd3fc', sad:'#93c5fd',
+    angry:'#fca5a5', excited:'#fde68a', scared:'#c4b5fd',
+  };
+  emotionChart = new Chart(document.getElementById('emotionChart'), {
+    type: 'doughnut',
+    data: {
+      labels,
+      datasets: [{ data, backgroundColor: labels.map(l => COLORS[l] || '#94a3b8'), borderWidth: 0 }]
+    },
+    options: {
+      plugins: { legend: { labels: { color: '#e2e8f0' } } },
+    }
+  });
+}
+
+function renderTrendChart(rows) {
+  trendChart = new Chart(document.getElementById('trendChart'), {
+    type: 'line',
+    data: {
+      labels: rows.map(r => r.day),
+      datasets: [{
+        label: 'Daily Avg Score',
+        data: rows.map(r => Math.round((r.avg_score||0)*100)),
+        borderColor: '#38bdf8',
+        backgroundColor: 'rgba(56,189,248,0.1)',
+        tension: 0.4,
+        fill: true,
+        pointRadius: 3,
+      }]
+    },
+    options: {
+      scales: {
+        x: { ticks: { color: '#94a3b8' }, grid: { color: '#1e293b' } },
+        y: { min:0, max:100, ticks: { color: '#94a3b8' }, grid: { color: '#1e293b' } },
+      },
+      plugins: { legend: { labels: { color: '#e2e8f0' } } },
+    }
+  });
+}
+
+function renderGameChart(games) {
+  gameChart = new Chart(document.getElementById('gameChart'), {
+    type: 'bar',
+    data: {
+      labels: games.map(g => g.game_type.replace('_', ' ')),
+      datasets: [
+        {
+          label: 'Avg Score %',
+          data: games.map(g => Math.round((g.avg_score||0)*100)),
+          backgroundColor: '#38bdf8',
+          borderRadius: 6,
+        },
+        {
+          label: 'Best Score %',
+          data: games.map(g => Math.round((g.best_score||0)*100)),
+          backgroundColor: '#4ade80',
+          borderRadius: 6,
+        }
+      ]
+    },
+    options: {
+      scales: {
+        x: { ticks: { color: '#94a3b8' }, grid: { color: '#1e293b' } },
+        y: { min:0, max:100, ticks: { color: '#94a3b8' }, grid: { color: '#1e293b' } },
+      },
+      plugins: { legend: { labels: { color: '#e2e8f0' } } },
+    }
+  });
+}
+
+function renderInterestChart(interests) {
+  const labels = Object.keys(interests);
+  const data   = Object.values(interests);
+  interestChart = new Chart(document.getElementById('interestChart'), {
+    type: 'polarArea',
+    data: {
+      labels,
+      datasets: [{ data, backgroundColor: labels.map((_,i) =>
+        `hsl(${(i*37)%360},70%,55%)`), borderWidth: 0 }]
+    },
+    options: {
+      plugins: { legend: { labels: { color: '#e2e8f0' } } },
+    }
+  });
+}
+
+function renderBadges(badges) {
+  const el = document.getElementById('badgeList');
+  if (!badges || badges.length === 0) {
+    el.innerHTML = '<p class="empty">No badges yet. Keep going! 🏅</p>'; return;
+  }
+  el.innerHTML = badges.map(b =>
+    `<span class="badge-chip">🏅 ${b.achievement_name}</span>`
+  ).join('');
+}
+
+function renderSessions(sessions) {
+  const tbody = document.getElementById('sessionTable');
+  if (!sessions || sessions.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" class="empty">No sessions yet.</td></tr>'; return;
+  }
+  tbody.innerHTML = sessions.map(s => {
+    const date = s.start_time ? new Date(s.start_time).toLocaleDateString() : '—';
+    const dur  = s.duration_seconds ? Math.round(s.duration_seconds/60) + ' min' : '—';
+    const attn = s.attention_score != null ? Math.round(s.attention_score*100)+'%' : '—';
+    const spch = s.speech_score    != null ? Math.round(s.speech_score*100)+'%'    : '—';
+    return `<tr>
+      <td>${date}</td>
+      <td>${s.session_type}</td>
+      <td>${dur}</td>
+      <td>${attn}</td>
+      <td>${spch}</td>
+      <td>${pill(s.mood_start)}</td>
+      <td>${pill(s.mood_end)}</td>
+    </tr>`;
+  }).join('');
+}
+</script>
+</body>
+</html>
