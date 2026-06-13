@@ -13,9 +13,9 @@ class FaceDisplay:
 
     def __init__(self):
         pygame.init()
-        self.width = settings.display.WIDTH
-        self.height = settings.display.HEIGHT
-        self.fps = settings.display.FPS
+        self.width = settings.ui.WIDTH
+        self.height = settings.ui.HEIGHT
+        self.fps = settings.ui.FPS
         
         # In production on RPi, you might want FULLSCREEN
         # self.screen = pygame.display.set_mode((self.width, self.height), pygame.FULLSCREEN)

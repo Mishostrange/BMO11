@@ -17,6 +17,7 @@ class AudioCapture:
         self._audio_queue = queue.Queue()
         self._stream = None
         self._is_running = False
+        self._muted = False   # True while BMO is speaking (prevents echo feedback)
 
     def _audio_callback(self, indata, frames, time_info, status):
         """Called by sounddevice from a high-priority C thread."""
@@ -24,7 +25,7 @@ class AudioCapture:
             logger.warning(f"Audio capture status: {status}")
         
         # Make a copy since indata buffer is reused by sounddevice
-        if self._is_running:
+        if self._is_running and not self._muted:
             self._audio_queue.put(indata.copy())
 
     def start(self):
@@ -55,6 +56,20 @@ class AudioCapture:
             self._stream.close()
             self._stream = None
             logger.info("Stopped audio capture")
+
+    def mute(self):
+        """Mute microphone input (called when BMO starts speaking)."""
+        self._muted = True
+        # Drain any leftover chunks from the queue to prevent stale audio
+        while not self._audio_queue.empty():
+            try:
+                self._audio_queue.get_nowait()
+            except queue.Empty:
+                break
+
+    def unmute(self):
+        """Unmute microphone input (called when BMO finishes speaking)."""
+        self._muted = False
 
     async def get_chunk_async(self) -> np.ndarray:
         """Async generator that yields audio chunks as they arrive."""

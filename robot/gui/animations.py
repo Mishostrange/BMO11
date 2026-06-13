@@ -21,8 +21,8 @@ class FaceAnimations:
             "blush": (100, 180, 140, 128)  # Semi-transparent
         }
         
-        self.width = settings.display.WIDTH
-        self.height = settings.display.HEIGHT
+        self.width = settings.ui.WIDTH
+        self.height = settings.ui.HEIGHT
         self.center_x = self.width // 2
         self.center_y = self.height // 2
         

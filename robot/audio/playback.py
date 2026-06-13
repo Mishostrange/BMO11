@@ -97,6 +97,14 @@ class AudioPlayback:
             
         self._playback_queue.put(audio_data)
 
+    def reopen(self, sample_rate: int):
+        """Stop current stream and reopen at a new sample rate. Called after TTS model loads."""
+        logger.info(f"Reopening playback stream at {sample_rate} Hz")
+        self.stop_stream()
+        self.sample_rate = sample_rate
+        self._buffer = np.array([], dtype='float32')
+        self.play_stream()
+
     def cancel_playback(self):
         """Barge-in: immediately stop current playback."""
         logger.info("Canceling audio playback (barge-in)")

@@ -17,4 +17,4 @@ class ServiceRegistry:
         return self._services[interface]
 
 # Global singleton
-registry = ServiceRegistry()
+service_registry = ServiceRegistry()

@@ -1,9 +1,13 @@
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from dotenv import load_dotenv
 
 # Base directory
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
+
+# Load environment variables from .env file
+load_dotenv(BASE_DIR / ".env")
 
 @dataclass
 class AudioConfig:
@@ -38,12 +42,26 @@ class UIConfig:
     FULLSCREEN: bool = False
 
 @dataclass
+class PerceptionConfig:
+    CAMERA_INDEX: int = 0
+    FPS: int = 15
+    FACE_DETECTION_CONFIDENCE: float = 0.5
+    ENGAGEMENT_THRESHOLD: float = 0.4
+
+@dataclass
+class DashboardConfig:
+    PORT: int = 5000
+    SECRET_KEY: str = os.environ.get("DASHBOARD_SECRET", "bmo-secret-change-me")
+
+@dataclass
 class BmoSettings:
     audio: AudioConfig = field(default_factory=AudioConfig)
     vad: VADConfig = field(default_factory=VADConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     db: DatabaseConfig = field(default_factory=DatabaseConfig)
     ui: UIConfig = field(default_factory=UIConfig)
+    perception: PerceptionConfig = field(default_factory=PerceptionConfig)
+    dashboard: DashboardConfig = field(default_factory=DashboardConfig)
 
 # Global instance
 settings = BmoSettings()

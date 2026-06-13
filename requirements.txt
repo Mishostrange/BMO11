@@ -4,30 +4,33 @@ numpy==1.26.4
 
 # VAD & STT
 torch>=2.0.0
-silero-vad==1.0.0
-faster-whisper==1.0.0
-onnxruntime==1.17.1
+silero-vad>=5.1.2
+faster-whisper>=1.0.0
+onnxruntime>=1.16.1
+
 
 # TTS
-kokoro-onnx==0.1.2
+piper-tts
 
 # LLM APIs
-groq==0.4.1
-google-generativeai==0.3.2
+groq>=0.11.0
+google-generativeai>=0.8.0
+httpx>=0.28.1
 
 # Perception (Camera & Emotion)
-opencv-python==4.9.0.80
-mediapipe==0.10.9
-librosa==0.10.1
-scikit-learn==1.4.0
+opencv-python>=4.9.0.80
+mediapipe
+librosa>=0.10.1
+scikit-learn>=1.4.0
 
 # Database & Vectors
-chromadb==0.4.22
+chromadb>=0.5.0
 
 # Web Dashboard
 Flask==3.0.2
 Flask-Login==0.6.3
 Werkzeug==3.0.1
+python-dotenv>=1.0.0
 
 # UI (Robot Face)
 pygame==2.5.2

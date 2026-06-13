@@ -17,7 +17,7 @@ class KokoroTTSNode:
         models_dir = BASE_DIR / "models"
         bmo_model_path = models_dir / "bmo.onnx"
         default_model_path = models_dir / "kokoro-v1.0.onnx"
-        voices_path = models_dir / "voices-v1.0.bin"
+        voices_path = models_dir / "voices.json"
         
         # Load custom model if exists, else fallback
         try:
@@ -25,11 +25,11 @@ class KokoroTTSNode:
                 logger.info(f"Loading custom TTS model: {bmo_model_path}")
                 self.kokoro = Kokoro(str(bmo_model_path), str(voices_path))
                 # Custom model should have its voice name mapped in voices.bin or use default
-                self.voice_name = "af_heart"  # Need to map to correct voice key
+                self.voice_name = "af_bella"  # Need to map to correct voice key
             elif default_model_path.exists():
                 logger.info(f"Loading default TTS model: {default_model_path}")
                 self.kokoro = Kokoro(str(default_model_path), str(voices_path))
-                self.voice_name = "af_heart" # Default female, change if needed
+                self.voice_name = "af_bella" # Default female, change if needed
             else:
                 logger.warning("TTS models not found! TTS will be disabled. See models/README.md")
                 self.kokoro = None
@@ -62,14 +62,18 @@ class KokoroTTSNode:
                 lang="en-us"
             )
             
-            loop = asyncio.get_running_loop()
-            while True:
-                try:
-                    # Run the synchronous generator step in a thread
-                    samples, sample_rate = await loop.run_in_executor(None, next, stream)
+            if hasattr(stream, '__aiter__'):
+                async for samples, sample_rate in stream:
                     yield samples
-                except StopIteration:
-                    break
+            else:
+                loop = asyncio.get_running_loop()
+                while True:
+                    try:
+                        # Run the synchronous generator step in a thread
+                        samples, sample_rate = await loop.run_in_executor(None, next, stream)
+                        yield samples
+                    except StopIteration:
+                        break
                 
         except Exception as e:
             logger.error(f"TTS synthesis error: {e}")

@@ -190,12 +190,13 @@ class VoiceAnalyzer:
             if zcr > 0.15:
                 return "excited", 0.60      # High ZCR = rapid articulation
 
-        # ── Low energy zone ───────────────────────────────────────────────────
+        # ── Low energy zone (silence / whisper) ─────────────────────────────
+        # IMPORTANT: rms < 0.015 is effectively silence or ambient room noise.
+        # Never classify silence as 'sad' — only classify if there is clear voiced pitch.
         if rms < 0.015:
-            if pitch > 0 and pitch < 180:
-                return "sad",     0.68      # Quiet + low pitch
-            if pitch == 0.0:
-                return "scared",  0.55      # Near-silence, very soft voice
+            if pitch > 50 and pitch < 180 and pstd > 5:
+                return "sad",     0.58      # Quiet + clearly voiced low pitch
+            return "neutral",  0.52         # Ambient noise → neutral, not sad
 
         # ── Mid energy ───────────────────────────────────────────────────────
         if 0.015 <= rms <= 0.06:
@@ -203,8 +204,8 @@ class VoiceAnalyzer:
                 return "neutral", 0.70
             if pitch > 260:
                 return "happy",   0.60
-            if pitch < 150 and rms < 0.03:
-                return "sad",     0.58
+            if pitch > 50 and pitch < 150 and rms < 0.03:
+                return "sad",     0.58      # Only sad if there is actual speech (pitch > 50)
 
         return "neutral", 0.55
 

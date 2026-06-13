@@ -27,7 +27,8 @@ POSITIVE_EMOTIONS = {"happy", "excited"}
 NEUTRAL_EMOTIONS  = {"neutral"}
 
 # How many consecutive same-emotion readings to trigger 'sustained' event
-SUSTAINED_THRESHOLD = 3
+# Set to 5 to avoid comfort mode being triggered by 1-2 noisy readings
+SUSTAINED_THRESHOLD = 5
 
 
 class EmotionTracker:

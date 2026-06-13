@@ -32,20 +32,39 @@ class FasterWhisperNode:
         except Exception as e:
             logger.error(f"Whisper warmup failed: {e}")
 
+    # Known Whisper hallucination phrases to discard (silence artefacts)
+    HALLUCINATION_PATTERNS = [
+        "thanks for watching", "thanks for listening",
+        "please subscribe", "subtitles by",
+        "[music]", "[applause]", "[laughter]",
+    ]
+    MIN_AUDIO_DURATION_S = 0.5   # ignore clips shorter than 0.5s
+
     async def _on_speech_ended(self, event_type: str, audio_data: np.ndarray):
         """Event handler for when VAD detects end of speech."""
+        # --- Gate 1: minimum duration ---
+        duration_s = len(audio_data.flatten()) / 16000
+        if duration_s < self.MIN_AUDIO_DURATION_S:
+            logger.debug(f"STT: Skipping short clip ({duration_s:.2f}s < {self.MIN_AUDIO_DURATION_S}s)")
+            return
+
         logger.debug("STT Node received speech buffer. Transcribing...")
         
         try:
-            # Run transcription in a separate thread so it doesn't block the async loop
             loop = asyncio.get_running_loop()
             text = await loop.run_in_executor(
-                None, 
-                self._transcribe_sync, 
+                None,
+                self._transcribe_sync,
                 audio_data
             )
-            
+
             if text and text.strip():
+                # --- Gate 2: hallucination filter ---
+                text_lower = text.strip().lower().rstrip('.')
+                if any(h in text_lower for h in self.HALLUCINATION_PATTERNS):
+                    logger.debug(f"STT: Discarded hallucination: '{text}'")
+                    return
+
                 logger.info(f"User: {text}")
                 await event_bus.publish('speech.transcribed', text)
             else:
@@ -60,7 +79,10 @@ class FasterWhisperNode:
         # - beam_size=1 is much faster than default 5
         # - best_of=1 disables multiple candidate generations
         # - vad_filter=False because we already did VAD externally
-        # - without_timestamps=True saves generation time
+        # Ensure audio is a 1D float32 array
+        if len(audio_data.shape) > 1:
+            audio_data = audio_data.flatten()
+        audio_data = audio_data.astype(np.float32)
         
         segments, _ = self.model.transcribe(
             audio_data,

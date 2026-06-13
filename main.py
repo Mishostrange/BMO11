@@ -18,7 +18,7 @@ from robot.audio.capture import AudioCapture
 from robot.audio.playback import AudioPlayback
 from robot.vad.silero_vad import SileroVADNode
 from robot.stt.whisper_stt import FasterWhisperNode
-from robot.tts.kokoro_tts import KokoroTTSNode
+from robot.tts.piper_tts import PiperTTSNode
 from robot.llm.groq_provider import GroqProvider
 from robot.llm.gemini_provider import GeminiProvider
 from robot.llm.provider_manager import ProviderManager
@@ -68,7 +68,6 @@ class BMO:
         logger.info("Bootstrapping BMO system...")
         
         # 1. Database
-        db.connect()
         run_migrations()  # auto-applies schema + migrations
         
         # 2. Memory stack
@@ -90,7 +89,7 @@ class BMO:
         
         vad = SileroVADNode()
         stt = FasterWhisperNode()
-        tts = KokoroTTSNode(playback_node=self.audio_playback)
+        tts = PiperTTSNode(playback_node=self.audio_playback, capture_node=self.audio_capture)
         
         service_registry.register("audio_capture",  self.audio_capture)
         service_registry.register("audio_playback", self.audio_playback)
@@ -102,8 +101,8 @@ class BMO:
         llm_manager     = ProviderManager(primary=groq_provider, fallback=gemini_provider)
         
         # 5. Therapy Engine
-        engine = TherapyEngine(llm_manager, self.memory_manager, session_manager)
-        service_registry.register("engine", engine)
+        self.engine = TherapyEngine(llm_manager, self.memory_manager, session_manager)
+        service_registry.register("engine", self.engine)
         
         # 6. Perception & Emotion
         self.camera    = CameraManager()
@@ -164,7 +163,11 @@ class BMO:
         
         logger.info("BMO is fully operational.")
         
-        # Wait for shutdown signal (in a real app, capture SIGINT/SIGTERM)
+        # Auto-start a session for the default child (ID 1)
+        # In a production app, this is triggered by Wake Word or Face ID
+        await self.engine.start_session(child_id=1, session_type="casual")
+        
+        # Wait for shutdown signal
         try:
             await asyncio.gather(vad_task, camera_task, gui_task)
         except asyncio.CancelledError:
@@ -188,7 +191,7 @@ class BMO:
         if self.camera: self.camera.stop()
         if self.gui: self.gui.stop()
         if self.flask_server: self.flask_server.shutdown()
-        db.close()
+        db.close_all()
         logger.info("Shutdown complete.")
 
 if __name__ == "__main__":
