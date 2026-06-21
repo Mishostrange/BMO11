@@ -13,7 +13,8 @@ class AudioPlayback:
         self.channels = 1
         
         self._playback_queue = queue.Queue()
-        self._buffer = np.array([], dtype='float32')
+        self._current_chunk: np.ndarray = None
+        self._chunk_index: int = 0
         self._stream = None
         self._is_playing = False
         self._cancel_flag = False
@@ -21,32 +22,47 @@ class AudioPlayback:
     def _playback_callback(self, outdata, frames, time_info, status):
         """Called by sounddevice when it needs more audio data."""
         if status:
-            logger.warning(f"Audio playback status: {status}")
+            if status.output_underflow:
+                pass  # Ignore harmless underflow warnings to reduce log spam
+            else:
+                logger.debug(f"Audio playback status: {status}")
             
         if self._cancel_flag:
             outdata.fill(0)
             raise sd.CallbackStop()
 
         try:
-            # Fill the internal buffer if we don't have enough frames
-            while len(self._buffer) < frames:
-                try:
-                    chunk = self._playback_queue.get_nowait()
-                    if len(chunk.shape) == 2:
-                        chunk = chunk.flatten()
-                    self._buffer = np.concatenate((self._buffer, chunk))
-                except queue.Empty:
-                    break
+            frames_written = 0
+            while frames_written < frames:
+                # Get next chunk if we don't have one
+                if self._current_chunk is None:
+                    try:
+                        chunk = self._playback_queue.get_nowait()
+                        if len(chunk.shape) == 2:
+                            chunk = chunk.flatten()
+                        self._current_chunk = chunk
+                        self._chunk_index = 0
+                    except queue.Empty:
+                        break
 
-            if len(self._buffer) == 0:
-                outdata.fill(0)
-            elif len(self._buffer) >= frames:
-                outdata[:] = self._buffer[:frames].reshape(-1, 1)
-                self._buffer = self._buffer[frames:]
-            else:
-                outdata[:len(self._buffer)] = self._buffer.reshape(-1, 1)
-                outdata[len(self._buffer):].fill(0)
-                self._buffer = np.array([], dtype='float32')
+                chunk_remaining = len(self._current_chunk) - self._chunk_index
+                frames_needed = frames - frames_written
+
+                take = min(chunk_remaining, frames_needed)
+                
+                # Write to output buffer
+                outdata[frames_written:frames_written+take, 0] = self._current_chunk[self._chunk_index:self._chunk_index+take]
+
+                self._chunk_index += take
+                frames_written += take
+
+                # If chunk is exhausted, clear it
+                if self._chunk_index >= len(self._current_chunk):
+                    self._current_chunk = None
+
+            # Fill any remaining frames with silence
+            if frames_written < frames:
+                outdata[frames_written:, 0].fill(0)
 
         except Exception as e:
             logger.error(f"Playback callback error: {e}")
@@ -102,7 +118,8 @@ class AudioPlayback:
         logger.info(f"Reopening playback stream at {sample_rate} Hz")
         self.stop_stream()
         self.sample_rate = sample_rate
-        self._buffer = np.array([], dtype='float32')
+        self._current_chunk = None
+        self._chunk_index = 0
         self.play_stream()
 
     def cancel_playback(self):

@@ -13,14 +13,23 @@ def setup_logging():
     )
 
     file_handler = RotatingFileHandler(
-        log_file, maxBytes=5*1024*1024, backupCount=3
+        log_file, maxBytes=5*1024*1024, backupCount=3, encoding='utf-8'
     )
     file_handler.setFormatter(formatter)
 
-    console_handler = logging.StreamHandler()
+    import sys
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8')
+    if hasattr(sys.stderr, 'reconfigure'):
+        sys.stderr.reconfigure(encoding='utf-8')
+        
+    console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(formatter)
 
     root_logger = logging.getLogger()
+    if root_logger.handlers:
+        root_logger.handlers.clear()
+        
     root_logger.setLevel(logging.INFO)
     root_logger.addHandler(file_handler)
     root_logger.addHandler(console_handler)

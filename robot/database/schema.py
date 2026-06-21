@@ -22,10 +22,13 @@ CREATE TABLE IF NOT EXISTS children (
     communication_level TEXT DEFAULT 'verbal',     -- verbal/limited/nonverbal
     preferred_games     TEXT DEFAULT '[]',          -- JSON array
     favorite_topics     TEXT DEFAULT '[]',          -- JSON array
+    favorite_animals    TEXT DEFAULT '[]',          -- JSON array
+    sensory_preferences TEXT DEFAULT '[]',          -- JSON array
     attention_score     REAL DEFAULT 0.5,
     speech_score        REAL DEFAULT 0.5,
     difficulty_level    INTEGER DEFAULT 1,
     avatar              TEXT DEFAULT 'default',
+    face_encoding       BLOB,                       -- 128D/512D ONNX feature vector
     is_active           BOOLEAN DEFAULT 1,
     created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -43,6 +46,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     words_spoken        INTEGER DEFAULT 0,
     attention_score     REAL,
     engagement_score    REAL,
+    eye_contact_score   REAL,
+    social_skill_score  REAL,
     speech_score        REAL,
     mood_start          TEXT,
     mood_end            TEXT,

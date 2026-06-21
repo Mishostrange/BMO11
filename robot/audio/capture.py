@@ -22,7 +22,10 @@ class AudioCapture:
     def _audio_callback(self, indata, frames, time_info, status):
         """Called by sounddevice from a high-priority C thread."""
         if status:
-            logger.warning(f"Audio capture status: {status}")
+            if status.input_overflow:
+                pass  # Ignore harmless overflow warnings to reduce log spam
+            else:
+                logger.debug(f"Audio capture status: {status}")
         
         # Make a copy since indata buffer is reused by sounddevice
         if self._is_running and not self._muted:
@@ -69,6 +72,12 @@ class AudioCapture:
 
     def unmute(self):
         """Unmute microphone input (called when BMO finishes speaking)."""
+        # Drain any leftover chunks from the queue to prevent stale audio/reverb
+        while not self._audio_queue.empty():
+            try:
+                self._audio_queue.get_nowait()
+            except queue.Empty:
+                break
         self._muted = False
 
     async def get_chunk_async(self) -> np.ndarray:

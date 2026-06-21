@@ -79,7 +79,12 @@ class PiperTTSNode:
                         arr = arr.flatten()
                     chunks.append(arr.astype(np.float32))
                 if chunks:
-                    return np.concatenate(chunks)
+                    out = np.concatenate(chunks)
+                    # Normalize and clip to prevent digital audio clipping (glitches)
+                    max_val = np.max(np.abs(out))
+                    if max_val > 0.95:
+                        out = (out / max_val) * 0.95
+                    return np.clip(out, -1.0, 1.0)
                 return np.array([], dtype=np.float32)
 
             audio_buf = await loop.run_in_executor(None, _synthesize_all)
@@ -92,12 +97,12 @@ class PiperTTSNode:
             self.playback_node.enqueue_chunk(audio_buf)
 
             # ── 4. Wait for the playback queue to fully drain ─────────────────
-            # Duration of the audio + 150 ms safety margin
+            # Duration of the audio + 300 ms safety margin to account for PyAudio startup latency
             duration_s = len(audio_buf) / self._sample_rate
-            await asyncio.sleep(duration_s + 0.15)
+            await asyncio.sleep(duration_s + 0.3)
 
             # ── 5. Extra tail silence so speaker reverb settles ───────────────
-            await asyncio.sleep(0.25)
+            await asyncio.sleep(0.5)
 
         except Exception as e:
             logger.error(f"Piper TTS synthesis error: {e}")

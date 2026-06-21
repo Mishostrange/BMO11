@@ -6,45 +6,78 @@ from robot.services.event_bus import event_bus
 
 @GameRegistry.register("emotions")
 class EmotionsGame(BaseGame):
+    """
+    Emotion Recognition Game.
+    Easy: Robot shows an emotion face, child identifies it from 2 options.
+    Medium: Robot shows an emotion face, child identifies it from 4 options.
+    Hard: Robot describes a situation, child identifies the resulting emotion.
+    """
     def __init__(self):
         super().__init__()
-        self.emotions = ["happy", "sad", "angry", "surprised", "scared"]
+        self.emotions = ["happy", "sad", "angry", "scared"]
         self.situations = {
-            "You got a new toy!": "happy",
-            "You dropped your ice cream.": "sad",
-            "Someone took your turn.": "angry",
-            "A loud noise scared you.": "scared"
+            "You got a brand new toy for your birthday!": "happy",
+            "You dropped your favorite ice cream on the floor.": "sad",
+            "Someone pushed you and took your turn on the swing.": "angry",
+            "A loud thunder noise woke you up in the dark.": "scared",
+            "Your best friend came over to play!": "happy",
+            "You lost your favorite teddy bear.": "sad"
         }
         self.current_target = None
         self.trial_start = None
 
     async def start(self, child_id: int, difficulty: int) -> str:
         self.child_id = child_id
-        self.difficulty = difficulty
+        # Map system difficulty 1-5 to Easy(1), Medium(2), Hard(3)
+        self.difficulty = min(3, max(1, difficulty))
         self.start_time = time.time()
         self.trials = []
+        # Generate the first face/scenario immediately
+        await self._generate_trial()
         return "Let's play the feelings game! I will show you a face, and you tell me how I feel."
 
     async def _generate_trial(self) -> str:
-        if self.difficulty <= 2:
-            # Show expression and ask
-            pool = self.emotions[:2] if self.difficulty == 1 else self.emotions[:4]
+        if self.difficulty == 1:
+            # Easy: 2 options
+            pool = random.sample(self.emotions, 2)
             self.current_target = random.choice(pool)
-            
-            # Emit event to change robot face
+            self._current_options = pool
             await event_bus.publish("ui.expression.change", self.current_target)
+            options_text = " or ".join(pool)
+            prompt = f"Look at my face. Do you think I feel {options_text}?"
             
-            prompt = "Look at my face. How am I feeling?"
+        elif self.difficulty == 2:
+            # Medium: 4 options
+            pool = list(self.emotions)
+            random.shuffle(pool)
+            self.current_target = random.choice(pool)
+            self._current_options = pool
+            await event_bus.publish("ui.expression.change", self.current_target)
+            options_text = ", ".join(pool[:-1]) + f", or {pool[-1]}"
+            prompt = f"Look at my face. Which face is this? Is it {options_text}?"
             
         else:
-            # Contextual situations
+            # Hard: Situational
             situation, emotion = random.choice(list(self.situations.items()))
             self.current_target = emotion
+            self._current_options = list(self.emotions)
             await event_bus.publish("ui.expression.change", "thinking")
-            prompt = f"Listen to this story: {situation} How would that make you feel?"
+            prompt = f"Listen to this story: {situation} How do you think that makes me feel?"
             
         self.trial_start = time.time()
+        await self._publish_state(prompt)
         return prompt
+
+    async def _publish_state(self, prompt: str = ""):
+        await event_bus.publish("game.state_update", {
+            "game_type": "emotions",
+            "state": {
+                "target":  self.current_target,
+                "options": getattr(self, "_current_options", []),
+            },
+            "prompt": prompt or "Say the emotion you see!",
+            "score_text": f"Score: {sum(1 for t in self.trials if t.correct)}/{len(self.trials)}",
+        })
 
     async def evaluate(self, response: str) -> GameResult:
         if not self.current_target:
@@ -55,20 +88,27 @@ class EmotionsGame(BaseGame):
         correct = self.current_target in response.lower()
         
         score = 1.0 if correct else 0.0
-        feedback = "Yes! That is exactly right!" if correct else f"Actually, I was feeling {self.current_target}."
         
-        # Reset face to happy after evaluation
-        await event_bus.publish("ui.expression.change", "happy")
+        if correct:
+            feedback = "Yes! That is exactly right! You are great at reading feelings."
+            await event_bus.publish("ui.expression.change", "happy")
+        else:
+            feedback = f"Good try! Actually, I was feeling {self.current_target}."
+            await event_bus.publish("ui.expression.change", "neutral")
         
         result = GameResult(correct=correct, score=score, response_time=response_time, feedback=feedback)
         self.trials.append(result)
+        
+        await event_bus.publish("game.scored", {"game_type": "emotions", "score": score, "child_id": self.child_id})
+        
         self.current_target = None 
         return result
 
     async def reward(self, result: GameResult) -> dict:
         if result.correct:
+            tokens = self.difficulty
             await event_bus.publish("ui.animation.trigger", {"type": "confetti"})
-            return {"tokens_earned": 2, "animation": "confetti"}
+            return {"tokens_earned": tokens, "animation": "confetti"}
         return {"tokens_earned": 0}
 
     async def finish(self) -> GameSummary:

@@ -19,8 +19,8 @@ class AudioConfig:
 @dataclass
 class VADConfig:
     THRESHOLD: float = 0.4
-    MIN_SILENCE_DURATION_MS: int = 250
-    SPEECH_PAD_MS: int = 50
+    MIN_SILENCE_DURATION_MS: int = 1000  # Allow longer pauses mid-sentence (was 250)
+    SPEECH_PAD_MS: int = 300             # Capture more trailing audio (was 50)
 
 @dataclass
 class LLMConfig:

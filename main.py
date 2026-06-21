@@ -1,7 +1,11 @@
 import asyncio
 import logging
 import threading
+import warnings
 from werkzeug.serving import make_server
+
+# Suppress harmless FutureWarnings from third-party libraries (e.g., insightface/scikit-image)
+warnings.filterwarnings('ignore', category=FutureWarning)
 
 # Config and Services
 from robot.config.logging_config import setup_logging
@@ -30,6 +34,8 @@ from robot.therapy.session_manager import SessionManager
 from robot.therapy.engine import TherapyEngine
 from robot.engagement.camera import CameraManager
 from robot.engagement.detector import EngagementDetector
+from robot.engagement.face_recognition_service import FaceRecognitionService
+from robot.engagement.gesture_recognizer import GestureRecognizer
 from robot.emotion.voice_analyzer import VoiceAnalyzer
 from robot.emotion.face_analyzer import FaceAnalyzer
 from robot.emotion.fusion import EmotionFusion
@@ -38,6 +44,7 @@ from robot.safety.content_filter import ContentFilter
 from robot.safety.distress_monitor import DistressMonitor
 from robot.analytics.session_tracker import SessionTracker
 from robot.analytics.progress_tracker import ProgressTracker
+from robot.services.voice_commands import VoiceCommandHandler
 
 # Games & Rewards
 import robot.games.colors_game
@@ -45,8 +52,14 @@ import robot.games.emotions_game
 import robot.games.speech_repeat_game
 import robot.games.turn_taking_game
 import robot.games.focus_game
+import robot.games.social_skills_game
+import robot.games.memory_match_game     # NEW: Memory Match
+import robot.games.imitation_game        # NEW: Imitation (Pose)
+import robot.therapy.sensory_regulation
 from robot.rewards.reward_system import RewardSystem
+from robot.rewards.badge_catalog import BadgeEngine  # NEW: Badge engine
 from robot.difficulty.adaptive import AdaptiveDifficulty
+from robot.therapy.game_orchestrator import GameOrchestrator  # NEW: Orchestrator
 
 # GUI & Dashboard
 from robot.gui.face_display import FaceDisplay
@@ -107,6 +120,8 @@ class BMO:
         # 6. Perception & Emotion
         self.camera    = CameraManager()
         engagement     = EngagementDetector()
+        face_recognition = FaceRecognitionService()
+        gesture_recognizer = GestureRecognizer()
         voice_analyzer = VoiceAnalyzer()
         voice_analyzer.stm = stm   # Wire STM reference for rolling emotion window
         face_analyzer  = FaceAnalyzer()
@@ -114,11 +129,12 @@ class BMO:
         emotion_tracker = EmotionTracker()  # session-level emotion state machine
         
         service_registry.register("emotion_tracker", emotion_tracker)
+        service_registry.register("gesture_recognizer", gesture_recognizer)
         
         # 7. Safety & Tracking
-        content_filter  = ContentFilter()
-        distress_monitor = DistressMonitor()
-        session_tracker  = SessionTracker(session_manager)
+        from robot.therapy.progress_tracker import ProgressTracker
+        # content_filter  = ContentFilter()
+        # distress_monitor = DistressMonitor()
         progress_tracker = ProgressTracker()
         
         service_registry.register("progress_tracker", progress_tracker)
@@ -127,7 +143,20 @@ class BMO:
         rewards      = RewardSystem()
         adaptive_diff = AdaptiveDifficulty()
         
-        # 9. GUI
+        # 8b. Game Orchestrator — wires dashboard → games → TherapyEngine
+        game_orchestrator = GameOrchestrator(adaptive_diff)
+        self.engine.game_orchestrator = game_orchestrator   # back-wire
+        service_registry.register("game_orchestrator", game_orchestrator)
+        
+        # 8c. Badge Engine (auto-awards badges after game results)
+        badge_engine = BadgeEngine()
+        service_registry.register("badge_engine", badge_engine)
+        
+        # 9. Voice Commands
+        voice_command_handler = VoiceCommandHandler()
+        service_registry.register("voice_command_handler", voice_command_handler)
+        
+        # 10. GUI
         self.gui = FaceDisplay()
         
         logger.info("Bootstrapping complete.")
@@ -162,10 +191,6 @@ class BMO:
         gui_task = asyncio.create_task(self.gui.run_loop())
         
         logger.info("BMO is fully operational.")
-        
-        # Auto-start a session for the default child (ID 1)
-        # In a production app, this is triggered by Wake Word or Face ID
-        await self.engine.start_session(child_id=1, session_type="casual")
         
         # Wait for shutdown signal
         try:

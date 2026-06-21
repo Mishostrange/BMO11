@@ -1,0 +1,17 @@
+# environment
+.env
+
+# python
+__pycache__/
+*.pyc
+
+# IDE
+.idea/
+
+# database & runtime data
+data/
+logs/
+
+# models cache (لو موجود)
+*.bin
+*.onnx

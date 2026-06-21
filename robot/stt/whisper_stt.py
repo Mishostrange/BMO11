@@ -7,7 +7,7 @@ from robot.services.event_bus import event_bus
 logger = logging.getLogger(__name__)
 
 class FasterWhisperNode:
-    def __init__(self, model_size="tiny.en"):
+    def __init__(self, model_size="small"):
         logger.info(f"Loading Faster Whisper model: {model_size}")
         # Use CPU with int8 quantization for best RPi5 performance
         self.model = WhisperModel(
@@ -32,12 +32,20 @@ class FasterWhisperNode:
         except Exception as e:
             logger.error(f"Whisper warmup failed: {e}")
 
-    # Known Whisper hallucination phrases to discard (silence artefacts)
+    # Known Whisper hallucination phrases to discard (substring match)
     HALLUCINATION_PATTERNS = [
         "thanks for watching", "thanks for listening",
         "please subscribe", "subtitles by",
         "[music]", "[applause]", "[laughter]",
+        "amara.org",
     ]
+    
+    # Exact match hallucinations (prevent substring bugs like "me" in "game")
+    EXACT_HALLUCINATIONS = {
+        "me", "you", "yeah", "oh", "ah", "um", 
+        "thank you", "let's play the memory", 
+        "here is the game rule", "which game do you want"
+    }
     MIN_AUDIO_DURATION_S = 0.5   # ignore clips shorter than 0.5s
 
     async def _on_speech_ended(self, event_type: str, audio_data: np.ndarray):
@@ -60,9 +68,18 @@ class FasterWhisperNode:
 
             if text and text.strip():
                 # --- Gate 2: hallucination filter ---
-                text_lower = text.strip().lower().rstrip('.')
-                if any(h in text_lower for h in self.HALLUCINATION_PATTERNS):
-                    logger.debug(f"STT: Discarded hallucination: '{text}'")
+                # Remove punctuation for matching
+                import string
+                clean_text = text.lower().translate(str.maketrans('', '', string.punctuation)).strip()
+                
+                # 1. Exact match check
+                if clean_text in self.EXACT_HALLUCINATIONS:
+                    logger.debug(f"STT: Discarded exact hallucination: '{text}'")
+                    return
+                
+                # 2. Substring match check
+                if any(h in clean_text for h in self.HALLUCINATION_PATTERNS):
+                    logger.debug(f"STT: Discarded substring hallucination: '{text}'")
                     return
 
                 logger.info(f"User: {text}")
@@ -84,14 +101,16 @@ class FasterWhisperNode:
             audio_data = audio_data.flatten()
         audio_data = audio_data.astype(np.float32)
         
-        segments, _ = self.model.transcribe(
+        segments, info = self.model.transcribe(
             audio_data,
             beam_size=1,
             best_of=1,
-            language="en",
-            vad_filter=False,
+            vad_filter=True,
             without_timestamps=True,
-            condition_on_previous_text=False  # Crucial for preventing hallucination loops
+            condition_on_previous_text=False
         )
-        
+        logger.info(
+            f"Detected language: {info.language} "
+            f"({info.language_probability:.2f})"
+        )
         return " ".join(seg.text for seg in segments).strip()

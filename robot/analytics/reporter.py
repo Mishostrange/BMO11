@@ -201,8 +201,9 @@ class AnalyticsReporter:
                 cursor.execute(
                     """
                     SELECT id, session_type, start_time, duration_seconds,
-                           attention_score, speech_score, mood_start, mood_end,
-                           difficulty_level
+                           attention_score, speech_score, engagement_score, 
+                           eye_contact_score, social_skill_score,
+                           mood_start, mood_end, difficulty_level
                     FROM sessions
                     WHERE child_id=?
                     ORDER BY start_time DESC LIMIT ?
@@ -212,6 +213,66 @@ class AnalyticsReporter:
                 return [dict(r) for r in cursor.fetchall()]
         except Exception as e:
             logger.error(f"[Reporter] session history error: {e}")
+            return []
+
+    def get_periodic_report(self, child_id: int, period: str = "daily") -> List[Dict[str, Any]]:
+        """
+        Generate aggregated reports for the dashboard.
+        Period can be 'daily', 'weekly', or 'monthly'.
+        """
+        if period == "weekly":
+            date_modifier = "strftime('%Y-%W', start_time)"
+        elif period == "monthly":
+            date_modifier = "strftime('%Y-%m', start_time)"
+        else: # daily
+            date_modifier = "DATE(start_time)"
+            
+        try:
+            with db.get_cursor() as cursor:
+                cursor.execute(
+                    f"""
+                    SELECT {date_modifier} AS period_date,
+                           SUM(duration_seconds) AS session_duration,
+                           AVG(engagement_score) AS engagement_score,
+                           AVG(eye_contact_score) AS eye_contact_score,
+                           AVG(social_skill_score) AS social_skill_score
+                    FROM sessions
+                    WHERE child_id=?
+                    GROUP BY period_date
+                    ORDER BY period_date ASC
+                    """,
+                    (child_id,)
+                )
+                session_data = {r["period_date"]: dict(r) for r in cursor.fetchall()}
+                
+                # Fetch emotion accuracy per period
+                cursor.execute(
+                    f"""
+                    SELECT {date_modifier.replace('start_time', 'played_at')} AS period_date,
+                           AVG(correct_count * 1.0 / MAX(total_count, 1)) AS emotion_accuracy
+                    FROM game_results
+                    WHERE child_id=? AND game_type='emotions'
+                    GROUP BY period_date
+                    """,
+                    (child_id,)
+                )
+                for r in cursor.fetchall():
+                    if r["period_date"] in session_data:
+                        session_data[r["period_date"]]["emotion_accuracy"] = r["emotion_accuracy"]
+                        
+                results = []
+                for date, data in session_data.items():
+                    results.append({
+                        "date": date,
+                        "emotion_accuracy": data.get("emotion_accuracy", 0.0),
+                        "eye_contact_score": data.get("eye_contact_score") or 0.0,
+                        "engagement_score": data.get("engagement_score") or 0.0,
+                        "social_skill_score": data.get("social_skill_score") or 0.0,
+                        "session_duration": data.get("session_duration") or 0
+                    })
+                return results
+        except Exception as e:
+            logger.error(f"[Reporter] periodic report error: {e}")
             return []
 
     # ── Interests (from memory) ───────────────────────────────────────────────

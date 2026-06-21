@@ -97,12 +97,21 @@ class LongTermMemory:
         return discovered
 
     def get_child_profile(self, child_id: int) -> Optional[Dict]:
-        """Fetch base child profile row."""
+        """Fetch base child profile row with all JSON arrays parsed."""
         try:
             with db.get_cursor() as cursor:
                 cursor.execute("SELECT * FROM children WHERE id=?", (child_id,))
                 row = cursor.fetchone()
-                return dict(row) if row else None
+                if not row:
+                    return None
+                profile = dict(row)
+                # Parse JSON fields for convenience
+                for field in ["preferred_games", "favorite_topics", "favorite_animals", "sensory_preferences"]:
+                    try:
+                        profile[field] = json.loads(profile.get(field) or "[]")
+                    except Exception:
+                        profile[field] = []
+                return profile
         except Exception as e:
             logger.error(f"[Memory] get_child_profile error: {e}")
             return None
@@ -173,9 +182,31 @@ class LongTermMemory:
 
         # ── Stored topic interests (JSON column) ─────────────────────────────
         try:
-            fav = json.loads(profile.get("favorite_topics") or "[]")
+            fav = profile.get("favorite_topics") or []
+            if isinstance(fav, str):
+                fav = json.loads(fav)
             if fav:
                 parts.append(f"Favourite topics: {', '.join(fav)}.")
+        except Exception:
+            pass
+
+        # ── Favourite animals ────────────────────────────────────────────────
+        try:
+            animals = profile.get("favorite_animals") or []
+            if isinstance(animals, str):
+                animals = json.loads(animals)
+            if animals:
+                parts.append(f"Favourite animals: {', '.join(animals)}.")
+        except Exception:
+            pass
+
+        # ── Sensory preferences ──────────────────────────────────────────────
+        try:
+            sensory = profile.get("sensory_preferences") or []
+            if isinstance(sensory, str):
+                sensory = json.loads(sensory)
+            if sensory:
+                parts.append(f"Sensory preferences: {', '.join(sensory)}.")
         except Exception:
             pass
 
