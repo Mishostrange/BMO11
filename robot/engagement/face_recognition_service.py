@@ -1,7 +1,6 @@
 import logging
 import numpy as np
 import asyncio
-from insightface.app import FaceAnalysis
 from robot.services.event_bus import event_bus
 from robot.database.connection import db
 
@@ -9,14 +8,11 @@ logger = logging.getLogger(__name__)
 
 class FaceRecognitionService:
     """
-    Subscribes to 'perception.frame'. Uses InsightFace to extract 512D face embeddings.
+    Subscribes to 'perception.frame'.
+    Receives InsightFace target_face directly from the CameraManager.
     Compares embeddings with the SQLite database to identify children or trigger registration.
     """
     def __init__(self):
-        # Initialize insightface
-        # 'buffalo_s' is a lightweight model perfect for CPU/RPi
-        self.app = FaceAnalysis(name='buffalo_s', allowed_modules=['recognition', 'detection'])
-        self.app.prepare(ctx_id=0, det_size=(640, 640)) # 0 means CPU
         
         self.known_faces = [] # List of tuples: (child_id, encoding)
         self._load_known_faces()
@@ -75,24 +71,10 @@ class FaceRecognitionService:
             return
         self._last_process_time = payload['timestamp']
         
-        # We need the BGR frame for InsightFace
-        frame_bgr = payload.get("frame_bgr")
-        if frame_bgr is None:
-            return
-
-        loop = asyncio.get_running_loop()
+        target_face = payload.get("insight_face")
         
-        # Run inference in executor
-        def _detect():
-            return self.app.get(frame_bgr)
-            
         try:
-            faces = await loop.run_in_executor(None, _detect)
-            
-            if faces:
-                # Assume largest face is target
-                faces = sorted(faces, key=lambda f: (f.bbox[2]-f.bbox[0])*(f.bbox[3]-f.bbox[1]), reverse=True)
-                target_face = faces[0]
+            if target_face:
                 embedding = target_face.embedding
                 
                 # Normalize embedding

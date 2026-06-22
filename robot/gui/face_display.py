@@ -47,6 +47,10 @@ class FaceDisplay:
         
         self.active_overlay = None
         self.overlay_end_time = 0
+        
+        # Video playback
+        self.video_cap = None
+        self.video_path = "faces/Videos/BMO dancing to BMO - كينزي (360p, h264).mp4"
 
         # VAD listening state
         self._listening = False
@@ -110,6 +114,20 @@ class FaceDisplay:
             self.overlay_end_time = time.time() + 3.0
         elif anim_type == "look_left":
             self.overlay_end_time = time.time() + 2.0
+        elif anim_type == "video_dance":
+            self.overlay_end_time = time.time() + 60.0  # Max timeout
+            if self.video_cap:
+                self.video_cap.release()
+            import cv2
+            import os
+            
+            # Use absolute path relative to the workspace to ensure it works
+            # assuming the CWD is the root of the project
+            abs_path = os.path.abspath(self.video_path)
+            self.video_cap = cv2.VideoCapture(abs_path)
+            if not self.video_cap.isOpened():
+                logger.error(f"Failed to open video: {abs_path}")
+                self.active_overlay = None
         else:
             self.overlay_end_time = time.time() + 2.0
 
@@ -119,6 +137,34 @@ class FaceDisplay:
             
         if time.time() > self.overlay_end_time:
             self.active_overlay = None
+            if self.video_cap:
+                self.video_cap.release()
+                self.video_cap = None
+            return
+
+        # ── Video Playback ────────────────────────────────────────────────────────
+        if self.active_overlay == "video_dance" and self.video_cap:
+            import cv2
+            import numpy as np
+            
+            ret, frame = self.video_cap.read()
+            if not ret:
+                self.active_overlay = None
+                self.video_cap.release()
+                self.video_cap = None
+                return
+                
+            # Convert BGR to RGB
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            
+            # Resize frame to fit screen
+            frame = cv2.resize(frame, (self.width, self.height))
+            
+            # Pygame expects (W, H, 3) layout
+            frame = np.swapaxes(frame, 0, 1)
+            surf = pygame.surfarray.make_surface(frame)
+            
+            self.screen.blit(surf, (0, 0))
             return
 
         # ── Breathing animation: pulsing calming circle ───────────────────────
@@ -237,8 +283,9 @@ class FaceDisplay:
             else:
                 # Normal face rendering
                 self.animator.draw(self.screen, self.current_expression, tick)
-                self._draw_overlay()
             
+            # Always draw overlays (like video) on top of whatever screen is active
+            self._draw_overlay()
             pygame.display.flip()
             
             # Yield to asyncio event loop

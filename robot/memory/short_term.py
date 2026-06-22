@@ -82,6 +82,37 @@ class ShortTermMemory:
         last_n = list(self.recent_emotions)[-threshold:]
         return all(e in negative for e, _ in last_n)
 
+    def get_emotion_trend(self) -> Dict[str, str]:
+        """Return a structured dictionary with current, previous, and trend of emotion."""
+        if not self.recent_emotions:
+            return {"current": "neutral", "previous": "neutral", "trend": "stable"}
+            
+        current, _ = self.recent_emotions[-1]
+        
+        # Determine previous (dominant in the older half of the window)
+        if len(self.recent_emotions) > 3:
+            older_half = list(self.recent_emotions)[:len(self.recent_emotions)//2]
+            counts = {}
+            for e, _ in older_half:
+                counts[e] = counts.get(e, 0) + 1
+            previous = max(counts, key=counts.get)
+        else:
+            previous = "neutral"
+            
+        trend = "stable"
+        if current != previous:
+            negative = {"angry", "sad", "frustrated", "scared"}
+            positive = {"happy", "excited"}
+            
+            if current in negative and previous not in negative:
+                trend = "worsening"
+            elif current in positive and previous not in positive:
+                trend = "improving"
+            else:
+                trend = "shifting"
+                
+        return {"current": current, "previous": previous, "trend": trend}
+
     # ── Internals ─────────────────────────────────────────────────────────────
 
     def _trim(self):

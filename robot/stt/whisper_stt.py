@@ -7,7 +7,7 @@ from robot.services.event_bus import event_bus
 logger = logging.getLogger(__name__)
 
 class FasterWhisperNode:
-    def __init__(self, model_size="small"):
+    def __init__(self, model_size="base"):
         logger.info(f"Loading Faster Whisper model: {model_size}")
         # Use CPU with int8 quantization for best RPi5 performance
         self.model = WhisperModel(

@@ -2,8 +2,8 @@ import cv2
 import asyncio
 import logging
 import numpy as np
-import mediapipe as mp
 import time
+from insightface.app import FaceAnalysis
 from robot.config.settings import settings
 from robot.services.event_bus import event_bus
 
@@ -22,14 +22,10 @@ class CameraManager:
         self.cap = None
         self._is_running = False
 
-        # Initialize MediaPipe Face Mesh centrally
-        self.mp_face_mesh = mp.solutions.face_mesh
-        self.face_mesh = self.mp_face_mesh.FaceMesh(
-            max_num_faces=1,
-            refine_landmarks=True,  # Need this for Iris (EAR)
-            min_detection_confidence=0.5,
-            min_tracking_confidence=0.5
-        )
+        # Initialize InsightFace centrally (replaces MediaPipe)
+        # 'buffalo_s' is lightweight and perfectly compatible with aarch64
+        self.app = FaceAnalysis(name='buffalo_s', allowed_modules=['recognition', 'detection'])
+        self.app.prepare(ctx_id=0, det_size=(640, 640)) # 0 means CPU/auto
 
     def start(self):
         if self._is_running:
@@ -54,7 +50,6 @@ class CameraManager:
         if self.cap:
             self.cap.release()
             self.cap = None
-        self.face_mesh.close()
         logger.info("Stopped camera")
 
     async def run_loop(self):
@@ -80,15 +75,23 @@ class CameraManager:
                             logger.warning(f"Camera frame is completely white! (brightness: {brightness:.2f})")
                     self._frame_count = getattr(self, '_frame_count', 0) + 1
 
-                    # 2. Run MediaPipe Face Mesh ONE time
-                    # This replaces the need for separate face detection everywhere
-                    results = await loop.run_in_executor(None, self.face_mesh.process, rgb_frame)
+                    # 2. Run InsightFace ONE time centrally
+                    def _detect():
+                        return self.app.get(frame)  # InsightFace uses BGR
+                        
+                    faces = await loop.run_in_executor(None, _detect)
+                    
+                    target_face = None
+                    if faces:
+                        # Assume largest face is target
+                        faces = sorted(faces, key=lambda f: (f.bbox[2]-f.bbox[0])*(f.bbox[3]-f.bbox[1]), reverse=True)
+                        target_face = faces[0]
 
                     # 3. Publish rich payload
                     payload = {
                         "frame_bgr": frame,
                         "frame_rgb": rgb_frame,
-                        "face_landmarks": results.multi_face_landmarks[0] if results.multi_face_landmarks else None,
+                        "insight_face": target_face,
                         "timestamp": start_t
                     }
                     

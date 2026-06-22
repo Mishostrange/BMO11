@@ -7,9 +7,8 @@ logger = logging.getLogger(__name__)
 
 class FaceAnalyzer:
     """
-    Analyzes MediaPipe Face Mesh landmarks to detect facial expressions.
-    Uses geometric heuristics (distances between landmarks) for ultra-lightweight
-    emotion detection without needing heavy ML models like DeepFace.
+    Analyzes InsightFace facial keypoints (kps) and bounding box to detect expressions.
+    Uses geometric heuristics for ultra-lightweight emotion detection.
     """
     
     def __init__(self):
@@ -19,74 +18,52 @@ class FaceAnalyzer:
         event_bus.subscribe('perception.frame', self._process_frame)
 
     def _dist(self, p1, p2):
-        """Calculate Euclidean distance between two landmarks."""
-        return np.sqrt((p1.x - p2.x)**2 + (p1.y - p2.y)**2)
+        """Calculate Euclidean distance between two points (x, y)."""
+        return np.sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)
 
     async def _process_frame(self, event_type: str, payload: dict):
         """Process a frame to detect facial emotion."""
         if payload['timestamp'] - self._last_process_time < self.polling_interval:
             return
             
-        landmarks = payload.get("face_landmarks")
-        if not landmarks:
+        face = payload.get("insight_face")
+        if face is None or not hasattr(face, 'kps'):
             return
             
         self._last_process_time = payload['timestamp']
             
         try:
-            # MediaPipe Face Mesh Landmark indices
-            # Mouth
-            mouth_left = landmarks.landmark[61]
-            mouth_right = landmarks.landmark[291]
-            mouth_top = landmarks.landmark[13]
-            mouth_bottom = landmarks.landmark[14]
-            # Eyebrows
-            left_eyebrow_inner = landmarks.landmark[55]
-            right_eyebrow_inner = landmarks.landmark[285]
-            left_eyebrow_outer = landmarks.landmark[105]
-            right_eyebrow_outer = landmarks.landmark[334]
-            # Eyes
-            left_eye_top = landmarks.landmark[159]
-            left_eye_bottom = landmarks.landmark[145]
+            left_eye = face.kps[0]
+            right_eye = face.kps[1]
+            nose = face.kps[2]
+            mouth_left = face.kps[3]
+            mouth_right = face.kps[4]
             
-            # Nose for normalization
-            nose_top = landmarks.landmark[8]
-            nose_bottom = landmarks.landmark[2]
-            face_height = self._dist(nose_top, nose_bottom)
+            bbox_width = face.bbox[2] - face.bbox[0]
+            bbox_height = face.bbox[3] - face.bbox[1]
             
-            # Heuristics
-            mouth_width = self._dist(mouth_left, mouth_right) / face_height
-            mouth_openness = self._dist(mouth_top, mouth_bottom) / face_height
+            # Heuristics using 5 points and bbox
+            mouth_width = self._dist(mouth_left, mouth_right)
+            eye_dist = self._dist(left_eye, right_eye)
             
-            # Eyebrow shape
-            left_eyebrow_slope = left_eyebrow_inner.y - left_eyebrow_outer.y
-            right_eyebrow_slope = right_eyebrow_inner.y - right_eyebrow_outer.y
-            eyebrow_furrow = self._dist(left_eyebrow_inner, right_eyebrow_inner) / face_height
-            
-            eye_openness = self._dist(left_eye_top, left_eye_bottom) / face_height
+            mouth_ratio = mouth_width / bbox_width
+            eye_ratio = eye_dist / bbox_width
             
             # Default to neutral
             emotion = "neutral"
             confidence = 0.5
             
-            # Simple threshold rules
-            if mouth_openness > 0.4 and eye_openness > 0.3:
-                emotion = "surprised"
-                confidence = 0.8
-            elif mouth_width > 0.9 and left_eyebrow_slope > -0.05:
-                # Wide mouth, eyebrows not pulled down
+            # Simple threshold rules based on 5 points
+            # Wide mouth relative to face width = smile
+            if mouth_ratio > 0.45:
                 emotion = "happy"
                 confidence = 0.8
-            elif eyebrow_furrow < 0.6 and left_eyebrow_slope < -0.05:
-                # Eyebrows pulled together and down
-                emotion = "angry"
-                confidence = 0.7
-            elif left_eyebrow_slope > 0.1 and right_eyebrow_slope > 0.1 and mouth_width < 0.8:
-                # Inner eyebrows pulled up
-                emotion = "sad"
+            # Eyes very wide apart relative to face (surprise/fear eyes)
+            elif eye_ratio > 0.5:
+                emotion = "surprised"
                 confidence = 0.6
                 
-            logger.debug(f"Detected face emotion: {emotion}")
+            logger.debug(f"Detected face emotion: {emotion} (mouth_ratio: {mouth_ratio:.2f})")
             
             # Publish face emotion result
             await event_bus.publish('emotion.face', {

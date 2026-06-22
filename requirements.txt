@@ -19,7 +19,7 @@ httpx>=0.28.1
 
 # Perception (Camera & Emotion)
 opencv-python>=4.9.0.80
-mediapipe
+insightface
 librosa>=0.10.1
 scikit-learn>=1.4.0
 
@@ -33,4 +33,4 @@ Werkzeug==3.0.1
 python-dotenv>=1.0.0
 
 # UI (Robot Face)
-pygame==2.5.2
+pygame-ce>=2.5.0

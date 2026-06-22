@@ -49,7 +49,7 @@ class AudioCapture:
             logger.info(f"Started audio capture (SR: {self.sample_rate}, Chunk: {self.chunk_size})")
         except Exception as e:
             logger.error(f"Failed to start audio capture: {e}")
-            raise
+            logger.warning("BMO will run without voice input. Please check your microphone connection.")
 
     def stop(self):
         """Stop the audio capture stream."""

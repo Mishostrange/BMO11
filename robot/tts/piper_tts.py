@@ -23,8 +23,8 @@ class PiperTTSNode:
                 if bmo_config_path.exists():
                     logger.info(f"Loading Piper TTS model: {bmo_model_path}")
                     self.voice = PiperVoice.load(str(bmo_model_path), str(bmo_config_path))
-                    self._sample_rate = self.voice.config.sample_rate
-                    logger.info(f"Piper sample rate: {self._sample_rate} Hz")
+                    self._sample_rate = 22050
+                    logger.info(f"Piper sample rate forced to: {self._sample_rate} Hz")
 
                     # Restart the playback stream at the model's native sample rate
                     if self.playback_node:

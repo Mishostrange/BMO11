@@ -53,13 +53,17 @@ import robot.games.speech_repeat_game
 import robot.games.turn_taking_game
 import robot.games.focus_game
 import robot.games.social_skills_game
-import robot.games.memory_match_game     # NEW: Memory Match
-import robot.games.imitation_game        # NEW: Imitation (Pose)
+import robot.games.memory_match_game
+import robot.games.imitation_game
 import robot.therapy.sensory_regulation
 from robot.rewards.reward_system import RewardSystem
-from robot.rewards.badge_catalog import BadgeEngine  # NEW: Badge engine
+from robot.rewards.badge_catalog import BadgeEngine
 from robot.difficulty.adaptive import AdaptiveDifficulty
-from robot.therapy.game_orchestrator import GameOrchestrator  # NEW: Orchestrator
+from robot.therapy.game_orchestrator import GameOrchestrator
+
+# Companion Architecture (v3)
+from robot.therapy.state_manager import state_manager, CompanionState
+from robot.therapy.emotional_continuity import emotion_engine
 
 # GUI & Dashboard
 from robot.gui.face_display import FaceDisplay
@@ -155,10 +159,18 @@ class BMO:
         # 9. Voice Commands
         voice_command_handler = VoiceCommandHandler()
         service_registry.register("voice_command_handler", voice_command_handler)
-        
-        # 10. GUI
+
+        # 10. Companion Architecture — register singletons so they are ready
+        # state_manager and emotion_engine are module-level singletons;
+        # importing them above is sufficient to activate their event subscriptions.
+        service_registry.register("state_manager",  state_manager)
+        service_registry.register("emotion_engine", emotion_engine)
+        state_manager.set_state(CompanionState.IDLE)  # explicit initial state
+        logger.info("[BMO] CompanionStateManager and EmotionalContinuityEngine registered.")
+
+        # 11. GUI
         self.gui = FaceDisplay()
-        
+
         logger.info("Bootstrapping complete.")
 
     def start_flask(self):

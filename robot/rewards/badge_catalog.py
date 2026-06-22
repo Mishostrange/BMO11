@@ -261,15 +261,13 @@ class BadgeEngine:
 
             for badge in newly_earned:
                 logger.info(f"[BadgeEngine] Awarded '{badge['name']}' to child {child_id}")
+                # Fire badge.earned event — the orchestrator will announce it after game ends
                 await event_bus.publish("badge.earned", {
                     "child_id": child_id,
                     "badge": badge,
                 })
+                # Only fire UI animation (no TTS here — orchestrator handles that)
                 await event_bus.publish("ui.animation.trigger", {"type": "fireworks"})
-                await event_bus.publish(
-                    "tts.synthesize",
-                    f"Congratulations! You earned the {badge['name']} badge!"
-                )
 
         except Exception as e:
             logger.error(f"[BadgeEngine] check_and_award error: {e}")
