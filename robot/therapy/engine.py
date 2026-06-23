@@ -67,6 +67,12 @@ class TherapyEngine:
         # Sleep state
         self.is_asleep = False
 
+        # ── Auto-start a guest session so BMO can always respond ──────────────
+        # child_id = 0 is a reserved "guest" slot used before face recognition.
+        # It will be replaced as soon as a known face is seen.
+        import asyncio
+        asyncio.get_event_loop().call_soon(lambda: asyncio.ensure_future(self._boot_guest_session()))
+
         # Decision engine thresholds
         self._ENGAGE_LOW_THRESHOLD  = 0.3
         self._EMOTION_ACC_THRESHOLD = 0.5
@@ -107,6 +113,12 @@ class TherapyEngine:
                 "child_id": child_id,
             })
 
+    async def _boot_guest_session(self):
+        """Start a guest session at boot so BMO can always respond."""
+        if not self.session_manager.active_child_id:
+            logger.info("[TherapyEngine] Auto-starting guest session (child_id=0).")
+            await self.start_session(0)
+
     async def _on_profile_created(self, _event: str, new_child_id: int):
         """Auto-start a session once a new child profile has been saved."""
         if self.session_manager.active_child_id != new_child_id:
@@ -114,43 +126,55 @@ class TherapyEngine:
             await self.start_session(new_child_id)
 
     async def _on_face_recognized(self, _event: str, child_id: int):
-        """Automatically start a session if a known child is seen."""
+        """Lock to the recognized child's session. Switch away from guest if needed."""
         if self.is_asleep:
             return
-        if self.session_manager.active_child_id is not None:
-            if self.session_manager.active_child_id != child_id:
-                logger.debug(f"[TherapyEngine] Session locked to child {self.session_manager.active_child_id}.")
+
+        current = self.session_manager.active_child_id
+
+        # Already locked to this child — do nothing
+        if current == child_id:
             return
 
-        logger.info(f"[TherapyEngine] Face recognized. Auto-starting session for child {child_id}")
-        await self.start_session(child_id)
-
-        profile = self.ltm.get_child_profile(child_id) or {}
-        name = profile.get("name", "friend")
-
-        # Build a personalised greeting using persistent memory
-        last_emotion = self.mem._last_emotion
-        last_game    = self.mem._last_game
-        last_topic   = self.mem._last_topic
-
-        if last_emotion and last_emotion in ("sad", "angry", "scared", "frustrated"):
-            greeting = f"Hello {name}! I'm really glad to see you. Last time you seemed a bit {last_emotion}. How are you feeling today?"
-        elif last_game:
-            game_friendly = last_game.replace("_", " ").title()
-            greeting = f"Welcome back, {name}! Last time we played {game_friendly}. Do you want to do something fun again?"
-        elif last_topic:
-            greeting = f"Hi {name}! I remember we were talking about {last_topic} last time. What would you like to talk about today?"
-        else:
-            topics = profile.get("favorite_topics", [])
-            animals = profile.get("favorite_animals", [])
-            if topics:
-                greeting = f"Hello {name}! I remember you love {topics[0]}. What do you want to do today?"
-            elif animals:
-                greeting = f"Hello {name}! Did you know {animals[0]}s are amazing? What's on your mind today?"
+        # Switching from guest OR a different child — lock to this one
+        if current != child_id:
+            if current and current != 0:
+                logger.info(
+                    f"[TherapyEngine] Switching session from child {current} "
+                    f"to recognized child {child_id}."
+                )
             else:
-                greeting = f"Hello {name}! I'm so happy to see you. What do you want to do today?"
+                logger.info(
+                    f"[TherapyEngine] Face recognized — locking session to child {child_id}."
+                )
 
-        await event_bus.publish("tts.synthesize", greeting)
+            await self.start_session(child_id)
+
+            profile = self.ltm.get_child_profile(child_id) or {}
+            name = profile.get("name", "friend")
+
+            last_emotion = self.mem._last_emotion
+            last_game    = self.mem._last_game
+            last_topic   = self.mem._last_topic
+
+            if last_emotion and last_emotion in ("sad", "angry", "scared", "frustrated"):
+                greeting = f"Hello {name}! I'm really glad to see you. Last time you seemed a bit {last_emotion}. How are you feeling today?"
+            elif last_game:
+                game_friendly = last_game.replace("_", " ").title()
+                greeting = f"Welcome back, {name}! Last time we played {game_friendly}. Do you want to do something fun again?"
+            elif last_topic:
+                greeting = f"Hi {name}! I remember we were talking about {last_topic} last time. What would you like to talk about today?"
+            else:
+                topics  = profile.get("favorite_topics", [])
+                animals = profile.get("favorite_animals", [])
+                if topics:
+                    greeting = f"Hello {name}! I remember you love {topics[0]}. What do you want to do today?"
+                elif animals:
+                    greeting = f"Hello {name}! Did you know {animals[0]}s are amazing? What's on your mind today?"
+                else:
+                    greeting = f"Hello {name}! I'm so happy to see you. What do you want to do today?"
+
+            await event_bus.publish("tts.synthesize", greeting)
 
     async def _on_face_unknown(self, _event: str, encoding_bytes: bytes):
         """Triggered when an unknown face is seen for several seconds."""
@@ -191,14 +215,10 @@ class TherapyEngine:
                 await event_bus.publish("tts.synthesize", "Hello! I'm here. Let me take a look at you.")
             return
 
-        # ── No active session ────────────────────────────────────────────────
+        # ── No active session fallback (should not happen, guest session covers this) ──
         if not self.session_manager.active_child_id:
-            if "start session" in text_lower:
-                await self.start_session(1)
-                await event_bus.publish("tts.synthesize", "Starting default session.")
-            else:
-                logger.warning("[TherapyEngine] Speech received but no active session.")
-            return
+            logger.warning("[TherapyEngine] No active session — auto-starting guest session.")
+            await self.start_session(0)
 
         child_id = self.session_manager.active_child_id
 

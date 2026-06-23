@@ -13,13 +13,21 @@ class SessionManager:
         self.max_duration_seconds = 30 * 60  # 30 minutes limit
 
     def start_session(self, child_id: int, session_type: str = "casual") -> int:
-        """Start a new session in the database."""
+        """Start a new session in the database.
+        child_id=0 is the reserved guest slot — no DB row is created for it.
+        """
         if self.active_session_id:
             logger.warning("Attempted to start a session while one is active. Ending old session.")
             self.end_session()
 
         self.active_child_id = child_id
         self.start_time = time.time()
+
+        # Guest session — skip DB insert (no child record to reference)
+        if child_id == 0:
+            self.active_session_id = None
+            logger.info("Started guest session (no DB row). BMO will respond to anyone.")
+            return 0
 
         try:
             with db.get_cursor() as cursor:
