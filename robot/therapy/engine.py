@@ -193,14 +193,10 @@ class TherapyEngine:
 
         # ── No active session ────────────────────────────────────────────────
         if not self.session_manager.active_child_id:
-            if "start session" in text_lower:
-                await self.start_session(1)
-                await event_bus.publish("tts.synthesize", "Starting default session.")
-            else:
-                logger.warning("[TherapyEngine] Speech received but no active session.")
-            return
-
-        child_id = self.session_manager.active_child_id
+            logger.info("[TherapyEngine] Speech received with no active session. Auto-starting default session.")
+            await self.start_session(1)
+            
+        child_id = self.session_manager.active_child_id or 1
 
         # ── STEP 1: IN_GAME delegation — checked before ALL shortcuts ─────────
         if self.game_orchestrator and self.game_orchestrator.is_game_active():
