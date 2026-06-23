@@ -20,6 +20,8 @@ class CameraManager:
         self.camera_index = settings.perception.CAMERA_INDEX
         self.fps = settings.perception.FPS
         self.cap = None
+        self.picam2 = None
+        self.use_picamera2 = False
         self._is_running = False
 
         # Initialize InsightFace centrally (replaces MediaPipe)
@@ -31,8 +33,29 @@ class CameraManager:
         if self._is_running:
             return
             
+        try:
+            import sys
+            # Allow importing system-installed picamera2 from within a virtual environment
+            if '/usr/lib/python3/dist-packages' not in sys.path:
+                sys.path.append('/usr/lib/python3/dist-packages')
+                
+            from picamera2 import Picamera2
+            self.picam2 = Picamera2()
+            config = self.picam2.create_preview_configuration(main={"format": 'RGB888', "size": (640, 480)})
+            self.picam2.configure(config)
+            self.picam2.start()
+            self.use_picamera2 = True
+            self._is_running = True
+            logger.info("Started camera using Picamera2")
+            return
+        except ImportError:
+            logger.info("Picamera2 not found, falling back to cv2.VideoCapture")
+        except Exception as e:
+            logger.warning(f"Picamera2 init failed: {e}. Falling back to cv2.VideoCapture")
+
         # Optimize for lowest latency: small buffer, MJPG format if possible
-        self.cap = cv2.VideoCapture(self.camera_index, cv2.CAP_DSHOW) if cv2.CAP_DSHOW else cv2.VideoCapture(self.camera_index)
+        # Use V4L2 backend for Raspberry Pi
+        self.cap = cv2.VideoCapture(self.camera_index, cv2.CAP_V4L2)
         if not self.cap.isOpened():
             logger.error(f"Failed to open camera at index {self.camera_index}")
             return
@@ -47,7 +70,10 @@ class CameraManager:
 
     def stop(self):
         self._is_running = False
-        if self.cap:
+        if self.use_picamera2 and self.picam2:
+            self.picam2.stop()
+            self.picam2 = None
+        elif self.cap:
             self.cap.release()
             self.cap = None
         logger.info("Stopped camera")
@@ -58,12 +84,24 @@ class CameraManager:
         while self._is_running:
             start_t = time.time()
             try:
-                # Read frame in executor
-                ret, frame = await loop.run_in_executor(None, self.cap.read)
+                frame = None
+                rgb_frame = None
+                ret = False
+
+                if self.use_picamera2:
+                    # Picamera2 returns RGB by default with RGB888 config
+                    rgb_frame = await loop.run_in_executor(None, self.picam2.capture_array)
+                    if rgb_frame is not None:
+                        ret = True
+                        frame = cv2.cvtColor(rgb_frame, cv2.COLOR_RGB2BGR)
+                else:
+                    # Read frame in executor
+                    ret, frame = await loop.run_in_executor(None, self.cap.read)
+                    if ret:
+                        # 1. Convert to RGB ONE time
+                        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 
                 if ret:
-                    # 1. Convert to RGB ONE time
-                    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                     rgb_frame.flags.writeable = False
                     
                     # Quick check if frame is pitch black (could be virtual camera / blocked)

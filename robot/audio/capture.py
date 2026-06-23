@@ -1,8 +1,10 @@
 import asyncio
 import logging
+import math
 import queue
 import numpy as np
 import sounddevice as sd
+from scipy.signal import resample_poly
 from robot.config.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -13,11 +15,15 @@ class AudioCapture:
         self.channels = settings.audio.CHANNELS
         self.chunk_size = settings.audio.CHUNK_SIZE
         self.dtype = settings.audio.DTYPE
+        self.device = settings.audio.INPUT_DEVICE
         
         self._audio_queue = queue.Queue()
         self._stream = None
         self._is_running = False
         self._muted = False   # True while BMO is speaking (prevents echo feedback)
+        
+        self.hardware_sample_rate = self.sample_rate
+        self._needs_resampling = False
 
     def _audio_callback(self, indata, frames, time_info, status):
         """Called by sounddevice from a high-priority C thread."""
@@ -42,12 +48,38 @@ class AudioCapture:
                 channels=self.channels,
                 dtype=self.dtype,
                 blocksize=self.chunk_size,
+                device=self.device,
                 callback=self._audio_callback
             )
             self._stream.start()
             self._is_running = True
             logger.info(f"Started audio capture (SR: {self.sample_rate}, Chunk: {self.chunk_size})")
         except Exception as e:
+            if "Invalid sample rate" in str(e) or "-9997" in str(e):
+                logger.warning(f"Native {self.sample_rate}Hz not supported. Falling back to 48000Hz hardware capture with software resampling...")
+                self.hardware_sample_rate = 48000
+                self._needs_resampling = True
+                
+                # Adjust chunk size so we get the same duration of audio per callback
+                ratio = 48000 / self.sample_rate
+                hw_chunk_size = int(self.chunk_size * ratio)
+                
+                try:
+                    self._stream = sd.InputStream(
+                        samplerate=self.hardware_sample_rate,
+                        channels=self.channels,
+                        dtype=self.dtype,
+                        blocksize=hw_chunk_size,
+                        device=self.device,
+                        callback=self._audio_callback
+                    )
+                    self._stream.start()
+                    self._is_running = True
+                    logger.info(f"Started audio capture (HW SR: {self.hardware_sample_rate}, Chunk: {hw_chunk_size})")
+                    return
+                except Exception as fallback_e:
+                    logger.error(f"Fallback audio capture also failed: {fallback_e}")
+                    
             logger.error(f"Failed to start audio capture: {e}")
             logger.warning("BMO will run without voice input. Please check your microphone connection.")
 
@@ -87,6 +119,18 @@ class AudioCapture:
             try:
                 # Use run_in_executor to not block the event loop on queue.get
                 chunk = await loop.run_in_executor(None, self._audio_queue.get, True, 0.1)
+                
+                # Perform software resampling if hardware didn't support our requested rate
+                if self._needs_resampling:
+                    # Use scipy — no Numba/numba dependency, works with any NumPy version
+                    if len(chunk.shape) == 2:
+                        chunk = chunk.flatten()
+                    g = math.gcd(self.sample_rate, self.hardware_sample_rate)
+                    up   = self.sample_rate // g
+                    down = self.hardware_sample_rate // g
+                    chunk = resample_poly(chunk, up, down).astype(np.float32)
+                    chunk = chunk.reshape(-1, 1)
+                    
                 yield chunk
             except queue.Empty:
                 await asyncio.sleep(0.01)

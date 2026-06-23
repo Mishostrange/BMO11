@@ -7,6 +7,7 @@ torch>=2.0.0
 silero-vad>=5.1.2
 faster-whisper>=1.0.0
 onnxruntime>=1.16.1
+ml_dtypes>=0.5.0
 
 
 # TTS
@@ -14,14 +15,14 @@ piper-tts
 
 # LLM APIs
 groq>=0.11.0
-google-generativeai>=0.8.0
+google-genai>=0.1.0
 httpx>=0.28.1
 
 # Perception (Camera & Emotion)
 opencv-python>=4.9.0.80
 insightface
-librosa>=0.10.1
 scikit-learn>=1.4.0
+scipy>=1.12.0
 
 # Database & Vectors
 chromadb>=0.5.0

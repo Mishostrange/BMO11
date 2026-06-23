@@ -12,14 +12,15 @@ Pipeline
 5. Log result to DB emotion_log table
 6. Feed result into ShortTermMemory rolling window
 
-Future upgrade: swap heuristic classifier with a TFLite SER model for
-accuracy without sacrificing RPi5 performance.
+NOTE: Pure numpy/scipy implementation — NO librosa/numba dependency.
+      This ensures compatibility with any NumPy version (including 2.5+).
 """
 
 import asyncio
 import logging
 import numpy as np
-import librosa
+from scipy.fft import fft
+from scipy.signal import get_window
 from typing import Tuple, Dict
 
 from robot.services.event_bus import event_bus
@@ -34,6 +35,81 @@ EMOTIONS = ["neutral", "happy", "sad", "angry", "scared", "excited"]
 N_MFCC       = 13    # MFCCs to extract
 HOP_LENGTH   = 512
 N_FFT        = 1024
+
+# ── Pure-numpy DSP helpers ────────────────────────────────────────────────────
+
+def _hz_to_mel(hz: np.ndarray) -> np.ndarray:
+    return 2595.0 * np.log10(1.0 + hz / 700.0)
+
+def _mel_to_hz(mel: np.ndarray) -> np.ndarray:
+    return 700.0 * (10.0 ** (mel / 2595.0) - 1.0)
+
+def _mel_filterbank(sr: int, n_fft: int, n_mels: int = 40) -> np.ndarray:
+    """Build a mel filterbank matrix (n_mels, n_fft//2+1)."""
+    low_hz   = 0.0
+    high_hz  = sr / 2.0
+    low_mel  = _hz_to_mel(np.array([low_hz]))[0]
+    high_mel = _hz_to_mel(np.array([high_hz]))[0]
+    mel_pts  = np.linspace(low_mel, high_mel, n_mels + 2)
+    hz_pts   = _mel_to_hz(mel_pts)
+    bin_pts  = np.floor((n_fft + 1) * hz_pts / sr).astype(int)
+    fb = np.zeros((n_mels, n_fft // 2 + 1))
+    for m in range(1, n_mels + 1):
+        lo, cen, hi = bin_pts[m-1], bin_pts[m], bin_pts[m+1]
+        for k in range(lo, cen):
+            if cen != lo:
+                fb[m-1, k] = (k - lo) / (cen - lo)
+        for k in range(cen, hi):
+            if hi != cen:
+                fb[m-1, k] = (hi - k) / (hi - cen)
+    return fb
+
+def _stft_magnitude(y: np.ndarray, n_fft: int, hop_length: int) -> np.ndarray:
+    """Compute STFT magnitude (n_fft//2+1, frames)."""
+    window = get_window("hann", n_fft, fftbins=True).astype(np.float32)
+    frames = []
+    for start in range(0, max(1, len(y) - n_fft + 1), hop_length):
+        frame = y[start:start + n_fft]
+        if len(frame) < n_fft:
+            frame = np.pad(frame, (0, n_fft - len(frame)))
+        frames.append(np.abs(fft(frame * window)[:n_fft // 2 + 1]))
+    return np.column_stack(frames) if frames else np.zeros((n_fft // 2 + 1, 1))
+
+def _compute_mfcc(y: np.ndarray, sr: int, n_mfcc: int,
+                  n_fft: int, hop_length: int) -> np.ndarray:
+    """Compute MFCCs (n_mfcc, frames) using pure numpy/scipy."""
+    mag  = _stft_magnitude(y, n_fft, hop_length)
+    fb   = _mel_filterbank(sr, n_fft, n_mels=40)
+    mel  = np.maximum(1e-10, fb @ mag)
+    log_mel = np.log(mel)
+    # DCT-II
+    n_mels = log_mel.shape[0]
+    dct = np.cos(np.pi / n_mels * np.outer(np.arange(n_mfcc), np.arange(0.5, n_mels)))
+    return dct @ log_mel
+
+def _delta(data: np.ndarray, width: int = 9) -> np.ndarray:
+    """Simple delta (first derivative) of feature matrix."""
+    pad = width // 2
+    padded = np.pad(data, ((0, 0), (pad, pad)), mode="edge")
+    slope = np.arange(-pad, pad + 1, dtype=np.float64)
+    norm = (slope ** 2).sum() or 1.0
+    return np.array([np.convolve(padded[i], slope[::-1], "valid") / norm
+                     for i in range(data.shape[0])])
+
+def _estimate_pitch(y: np.ndarray, sr: int,
+                    fmin: float = 65.0, fmax: float = 2100.0) -> float:
+    """Lightweight autocorrelation-based pitch estimate (no numba)."""
+    y = y - y.mean()
+    n = len(y)
+    if n < 2:
+        return 0.0
+    lag_min = max(1, int(sr / fmax))
+    lag_max = min(n - 1, int(sr / fmin))
+    if lag_min >= lag_max:
+        return 0.0
+    corr = np.correlate(y, y, mode="full")[n - 1:]
+    peak_lag = lag_min + int(np.argmax(corr[lag_min:lag_max]))
+    return float(sr / peak_lag) if peak_lag > 0 else 0.0
 
 
 class VoiceAnalyzer:
@@ -112,52 +188,43 @@ class VoiceAnalyzer:
 
         sr = self.sample_rate
 
-        # ── MFCCs ─────────────────────────────────────────────────────────────
-        mfcc = librosa.feature.mfcc(
-            y=y, sr=sr, n_mfcc=N_MFCC,
-            hop_length=HOP_LENGTH, n_fft=N_FFT
-        )
-        mfcc_delta  = librosa.feature.delta(mfcc)
-        mfcc_mean   = mfcc.mean(axis=1)
-        delta_mean  = mfcc_delta.mean(axis=1)
+        # ── MFCCs (pure numpy/scipy) ──────────────────────────────────────────
+        mfcc       = _compute_mfcc(y, sr, N_MFCC, N_FFT, HOP_LENGTH)
+        mfcc_delta = _delta(mfcc)
+        mfcc_mean  = mfcc.mean(axis=1)
+        delta_mean = mfcc_delta.mean(axis=1)
 
         # ── Energy (RMS) ──────────────────────────────────────────────────────
-        rms       = librosa.feature.rms(y=y, hop_length=HOP_LENGTH)[0]
-        mean_rms  = float(np.mean(rms))
-        rms_var   = float(np.var(rms))
+        mag      = _stft_magnitude(y, N_FFT, HOP_LENGTH)
+        rms      = np.sqrt(np.mean(mag ** 2, axis=0))
+        mean_rms = float(np.mean(rms))
+        rms_var  = float(np.var(rms))
 
         # ── Spectral centroid (brightness) ────────────────────────────────────
-        centroid  = librosa.feature.spectral_centroid(y=y, sr=sr, n_fft=N_FFT)[0]
+        freqs     = np.linspace(0, sr / 2, mag.shape[0])
+        mag_sum   = mag.sum(axis=0)
+        mag_sum   = np.where(mag_sum == 0, 1e-10, mag_sum)
+        centroid  = (freqs[:, None] * mag).sum(axis=0) / mag_sum
         mean_cent = float(np.mean(centroid))
 
-        # ── Zero-crossing rate (noisiness / fricatives) ───────────────────────
-        zcr      = librosa.feature.zero_crossing_rate(y, hop_length=HOP_LENGTH)[0]
-        mean_zcr = float(np.mean(zcr))
+        # ── Zero-crossing rate ────────────────────────────────────────────────
+        frames_zcr = []
+        for start in range(0, max(1, len(y) - HOP_LENGTH), HOP_LENGTH):
+            frame = y[start:start + HOP_LENGTH]
+            frames_zcr.append(float(np.mean(np.abs(np.diff(np.sign(frame)))) / 2))
+        mean_zcr = float(np.mean(frames_zcr)) if frames_zcr else 0.0
 
-        # ── Pitch (F0) ────────────────────────────────────────────────────────
-        try:
-            f0, voiced_flag, _ = librosa.pyin(
-                y,
-                fmin=librosa.note_to_hz("C2"),
-                fmax=librosa.note_to_hz("C7"),
-                sr=sr,
-            )
-            valid_f0   = f0[voiced_flag] if voiced_flag is not None else np.array([])
-            mean_pitch = float(np.mean(valid_f0)) if len(valid_f0) > 0 else 0.0
-            pitch_std  = float(np.std(valid_f0))  if len(valid_f0) > 0 else 0.0
-        except Exception:
-            mean_pitch = 0.0
-            pitch_std  = 0.0
+        # ── Pitch (autocorrelation, no numba) ────────────────────────────────
+        mean_pitch = _estimate_pitch(y, sr)
+        pitch_std  = 0.0   # single estimate; std not available without per-frame
 
         return {
-            # Raw summary stats
             "mean_rms":    mean_rms,
             "rms_var":     rms_var,
             "mean_pitch":  mean_pitch,
             "pitch_std":   pitch_std,
             "mean_cent":   mean_cent,
             "mean_zcr":    mean_zcr,
-            # MFCC statistics (first 4 coefficients are most discriminative)
             "mfcc_0":      float(mfcc_mean[0]),
             "mfcc_1":      float(mfcc_mean[1]),
             "mfcc_2":      float(mfcc_mean[2]),

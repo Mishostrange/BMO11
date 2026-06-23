@@ -1,8 +1,11 @@
 import asyncio
 import logging
+import math
 import queue
 import numpy as np
 import sounddevice as sd
+from scipy.signal import resample_poly
+from robot.config.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -11,6 +14,7 @@ class AudioPlayback:
         # Default Kokoro sample rate is 24000
         self.sample_rate = sample_rate
         self.channels = 1
+        self.device = settings.audio.OUTPUT_DEVICE
         
         self._playback_queue = queue.Queue()
         self._current_chunk: np.ndarray = None
@@ -18,6 +22,9 @@ class AudioPlayback:
         self._stream = None
         self._is_playing = False
         self._cancel_flag = False
+        
+        self.hardware_sample_rate = self.sample_rate
+        self._needs_resampling = False
 
     def _playback_callback(self, outdata, frames, time_info, status):
         """Called by sounddevice when it needs more audio data."""
@@ -79,12 +86,33 @@ class AudioPlayback:
                 samplerate=self.sample_rate,
                 channels=self.channels,
                 dtype='float32',
+                device=self.device,
                 callback=self._playback_callback
             )
             self._stream.start()
             self._is_playing = True
             logger.info(f"Started audio playback stream (SR: {self.sample_rate})")
         except Exception as e:
+            if "Invalid sample rate" in str(e) or "-9997" in str(e):
+                logger.warning(f"Native {self.sample_rate}Hz not supported for playback. Falling back to 48000Hz hardware playback with software resampling...")
+                self.hardware_sample_rate = 48000
+                self._needs_resampling = True
+                
+                try:
+                    self._stream = sd.OutputStream(
+                        samplerate=self.hardware_sample_rate,
+                        channels=self.channels,
+                        dtype='float32',
+                        device=self.device,
+                        callback=self._playback_callback
+                    )
+                    self._stream.start()
+                    self._is_playing = True
+                    logger.info(f"Started audio playback stream (HW SR: {self.hardware_sample_rate})")
+                    return
+                except Exception as fallback_e:
+                    logger.error(f"Fallback audio playback also failed: {fallback_e}")
+
             logger.error(f"Failed to start audio playback: {e}")
 
     def stop_stream(self):
@@ -111,6 +139,17 @@ class AudioPlayback:
         if len(audio_data.shape) == 1:
             audio_data = audio_data.reshape(-1, 1)
             
+        # Perform software resampling if hardware didn't support Piper's native rate
+        if self._needs_resampling:
+            # Use scipy — no Numba/numba dependency, works with any NumPy version
+            if len(audio_data.shape) == 2:
+                audio_data = audio_data.flatten()
+            g = math.gcd(self.sample_rate, self.hardware_sample_rate)
+            up   = self.hardware_sample_rate // g
+            down = self.sample_rate // g
+            audio_data = resample_poly(audio_data, up, down).astype(np.float32)
+            audio_data = audio_data.reshape(-1, 1)
+
         self._playback_queue.put(audio_data)
 
     def reopen(self, sample_rate: int):

@@ -9,12 +9,24 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 # Load environment variables from .env file
 load_dotenv(BASE_DIR / ".env")
 
+from typing import Optional, Union
+
 @dataclass
 class AudioConfig:
     SAMPLE_RATE: int = 16000
     CHANNELS: int = 1
     CHUNK_SIZE: int = 512
     DTYPE: str = 'float32'
+    INPUT_DEVICE: Optional[Union[int, str]] = None
+    OUTPUT_DEVICE: Optional[Union[int, str]] = None
+
+    def __post_init__(self):
+        if "AUDIO_INPUT_DEVICE" in os.environ:
+            val = os.environ["AUDIO_INPUT_DEVICE"]
+            self.INPUT_DEVICE = int(val) if val.isdigit() else val
+        if "AUDIO_OUTPUT_DEVICE" in os.environ:
+            val = os.environ["AUDIO_OUTPUT_DEVICE"]
+            self.OUTPUT_DEVICE = int(val) if val.isdigit() else val
 
 @dataclass
 class VADConfig:
