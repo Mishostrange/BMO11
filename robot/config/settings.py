@@ -30,9 +30,9 @@ class AudioConfig:
 
 @dataclass
 class VADConfig:
-    THRESHOLD: float = 0.6              # Higher = less false positives from background noise
-    MIN_SILENCE_DURATION_MS: int = 600  # How long silence must last before speech segment ends
-    SPEECH_PAD_MS: int = 300            # Extra padding around detected speech
+    THRESHOLD: float = 0.4
+    MIN_SILENCE_DURATION_MS: int = 1000  # Allow longer pauses mid-sentence (was 250)
+    SPEECH_PAD_MS: int = 300             # Capture more trailing audio (was 50)
 
 @dataclass
 class LLMConfig:

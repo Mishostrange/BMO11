@@ -8,21 +8,11 @@ All data endpoints return JSON so the frontend can chart them with Chart.js.
 from flask import Blueprint, render_template, jsonify, request
 from robot.profiles.child_profile  import ChildProfileManager
 from robot.analytics.reporter      import AnalyticsReporter
-from robot.services.event_bus      import event_bus
 
 bp = Blueprint("dashboard", __name__)
 
 _profiles  = ChildProfileManager()
 _reporter  = AnalyticsReporter()
-
-# Vision debug state
-_latest_vision_data = {}
-
-async def _on_engagement_update(event_type: str, payload: dict):
-    global _latest_vision_data
-    _latest_vision_data = payload
-
-event_bus.subscribe('engagement.update', _on_engagement_update)
 
 
 # ── HTML views ────────────────────────────────────────────────────────────────
@@ -119,19 +109,3 @@ def get_analytics(child_id: int):
         "sessions":      _reporter.get_session_history(child_id, limit=10),
         "interests":     _reporter.get_interest_distribution(child_id),
     })
-
-@bp.route("/api/debug/vision")
-def debug_vision():
-    # Remove large embedding bytes for dashboard
-    clean_data = {}
-    if _latest_vision_data:
-        clean_data = {
-            "engaged": _latest_vision_data.get("engaged", False),
-            "score": _latest_vision_data.get("score", 0.0),
-            "faces_attention": []
-        }
-        for f in _latest_vision_data.get("faces_attention", []):
-            face_clean = {k: v for k, v in f.items() if k != "embedding"}
-            clean_data["faces_attention"].append(face_clean)
-            
-    return jsonify(clean_data)

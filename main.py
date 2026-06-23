@@ -34,7 +34,6 @@ from robot.therapy.session_manager import SessionManager
 from robot.therapy.engine import TherapyEngine
 from robot.engagement.camera import CameraManager
 from robot.engagement.detector import EngagementDetector
-from robot.engagement.user_session import UserSessionManager
 from robot.engagement.face_recognition_service import FaceRecognitionService
 from robot.engagement.gesture_recognizer import GestureRecognizer
 from robot.emotion.voice_analyzer import VoiceAnalyzer
@@ -125,7 +124,6 @@ class BMO:
         # 6. Perception & Emotion
         self.camera    = CameraManager()
         engagement     = EngagementDetector()
-        user_session   = UserSessionManager()
         face_recognition = FaceRecognitionService()
         gesture_recognizer = GestureRecognizer()
         voice_analyzer = VoiceAnalyzer()

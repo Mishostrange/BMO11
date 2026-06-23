@@ -28,19 +28,10 @@ CREATE TABLE IF NOT EXISTS children (
     speech_score        REAL DEFAULT 0.5,
     difficulty_level    INTEGER DEFAULT 1,
     avatar              TEXT DEFAULT 'default',
-    face_encoding       BLOB,                       -- DEPRECATED: use face_embeddings table
+    face_encoding       BLOB,                       -- 128D/512D ONNX feature vector
     is_active           BOOLEAN DEFAULT 1,
-    last_seen           TIMESTAMP,
     created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- Multiple face embeddings per child for better recognition
-CREATE TABLE IF NOT EXISTS face_embeddings (
-    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-    child_id            INTEGER NOT NULL REFERENCES children(id),
-    embedding           BLOB NOT NULL,
-    created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Therapy sessions

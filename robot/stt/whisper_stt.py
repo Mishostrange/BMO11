@@ -46,8 +46,7 @@ class FasterWhisperNode:
         "thank you", "let's play the memory", 
         "here is the game rule", "which game do you want"
     }
-    MIN_AUDIO_DURATION_S = 0.8   # ignore clips shorter than 0.8s
-    MIN_RMS_ENERGY = 0.002        # just above measured noise floor (0.0014-0.0015)
+    MIN_AUDIO_DURATION_S = 0.5   # ignore clips shorter than 0.5s
 
     async def _on_speech_ended(self, event_type: str, audio_data: np.ndarray):
         """Event handler for when VAD detects end of speech."""
@@ -56,13 +55,6 @@ class FasterWhisperNode:
         if duration_s < self.MIN_AUDIO_DURATION_S:
             logger.debug(f"STT: Skipping short clip ({duration_s:.2f}s < {self.MIN_AUDIO_DURATION_S}s)")
             return
-        
-        # --- Gate 2: RMS energy check (drop background noise) ---
-        rms = float(np.sqrt(np.mean(audio_data.flatten() ** 2)))
-        if rms < self.MIN_RMS_ENERGY:
-            logger.info(f"STT: Skipping silent clip (RMS={rms:.4f} < {self.MIN_RMS_ENERGY}) — background noise")
-            return
-        logger.info(f"STT: Received audio clip (duration={duration_s:.2f}s, RMS={rms:.4f}) — sending to Whisper")
 
         logger.debug("STT Node received speech buffer. Transcribing...")
         
@@ -82,18 +74,18 @@ class FasterWhisperNode:
                 
                 # 1. Exact match check
                 if clean_text in self.EXACT_HALLUCINATIONS:
-                    logger.info(f"STT: Hallucination filtered (exact match): '{text}'")
+                    logger.debug(f"STT: Discarded exact hallucination: '{text}'")
                     return
                 
                 # 2. Substring match check
                 if any(h in clean_text for h in self.HALLUCINATION_PATTERNS):
-                    logger.info(f"STT: Hallucination filtered (pattern match): '{text}'")
+                    logger.debug(f"STT: Discarded substring hallucination: '{text}'")
                     return
 
                 logger.info(f"User: {text}")
                 await event_bus.publish('speech.transcribed', text)
             else:
-                logger.info("STT: Empty transcription — Whisper returned no text for this audio clip")
+                logger.debug("STT: No speech detected in buffer")
                 
         except Exception as e:
             logger.error(f"STT transcription failed: {e}", exc_info=True)
@@ -113,7 +105,7 @@ class FasterWhisperNode:
             audio_data,
             beam_size=1,
             best_of=1,
-            vad_filter=False,
+            vad_filter=True,
             without_timestamps=True,
             condition_on_previous_text=False
         )

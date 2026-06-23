@@ -68,7 +68,7 @@ class TherapyEngine:
         self.is_asleep = False
 
         # Decision engine thresholds
-        self._ENGAGE_LOW_THRESHOLD  = 40.0  # Out of 100
+        self._ENGAGE_LOW_THRESHOLD  = 0.3
         self._EMOTION_ACC_THRESHOLD = 0.5
         self._SOCIAL_ACC_THRESHOLD  = 0.5
 
@@ -152,14 +152,14 @@ class TherapyEngine:
 
         await event_bus.publish("tts.synthesize", greeting)
 
-    async def _on_face_unknown(self, _event: str, payload: dict):
+    async def _on_face_unknown(self, _event: str, encoding_bytes: bytes):
         """Triggered when an unknown face is seen for several seconds."""
         if not self.is_registering:
             if self.session_manager.active_session_id:
                 return
             logger.info("[TherapyEngine] Unknown face detected. Starting registration.")
             self.is_registering = True
-            self.pending_registration_embeddings = payload.get("embeddings", [])
+            self.pending_registration_encoding = encoding_bytes
             await event_bus.publish("tts.synthesize",
                 "Hello! I don't think we've met before. I'm BMO. What's your name?")
 
@@ -168,7 +168,7 @@ class TherapyEngine:
         self._last_speech_time = time.time()
 
         # ── Registration intercept ─────────────────────────────────────────────
-        if self.is_registering and getattr(self, 'pending_registration_embeddings', None):
+        if self.is_registering and self.pending_registration_encoding:
             await self._handle_registration(text)
             return
 
@@ -193,11 +193,14 @@ class TherapyEngine:
 
         # ── No active session ────────────────────────────────────────────────
         if not self.session_manager.active_child_id:
-            logger.info("[TherapyEngine] Speech received with no active session. Auto-starting default session.")
-            await self.start_session(1)
+            if "start session" in text_lower:
+                await self.start_session(1)
+                await event_bus.publish("tts.synthesize", "Starting default session.")
+            else:
+                logger.warning("[TherapyEngine] Speech received but no active session.")
+            return
 
-        child_id = self.session_manager.active_child_id or 1
-        logger.info(f"[TherapyEngine] Processing speech for child_id={child_id}: '{text[:60]}'")
+        child_id = self.session_manager.active_child_id
 
         # ── STEP 1: IN_GAME delegation — checked before ALL shortcuts ─────────
         if self.game_orchestrator and self.game_orchestrator.is_game_active():
@@ -280,10 +283,12 @@ class TherapyEngine:
         soft_hint = ""
         if interaction_type != "comfort_mode":
             now = time.time()
-            composite_engagement = self._latest_attention
+            speech_bonus = 0.5 if (now - self._last_speech_time < 5.0) else 0.0
+            composite_engagement = min(1.0, self._latest_attention + speech_bonus)
 
             logger.info(
-                f"[Engagement] attention={self._latest_attention:.1f} (0-100 scale)"
+                f"[Engagement] attention={self._latest_attention:.2f} "
+                f"speech_bonus={speech_bonus:.2f} composite={composite_engagement:.2f}"
             )
 
             if composite_engagement < self._ENGAGE_LOW_THRESHOLD:
@@ -338,7 +343,7 @@ class TherapyEngine:
         messages = [{"role": "system", "content": system_prompt}]
         messages.extend(self.mem.get_recent_messages())
 
-        logger.info(f"[TherapyEngine] Pipeline: text='{text[:50]}' intent={interaction_type} emotion={current_emotion} frustration={frustration}")
+        logger.debug(f"[TherapyEngine] Intent={interaction_type} Emotion={current_emotion} Frustration={frustration}")
 
         # J. LLM call
         try:
@@ -376,22 +381,14 @@ class TherapyEngine:
 
             from robot.database.connection import db
             with db.get_cursor() as cursor:
-                # Insert into children (without face_encoding blob)
                 cursor.execute(
-                    "INSERT INTO children (caregiver_id, name) VALUES (1, ?)",
-                    (name,)
+                    "INSERT INTO children (caregiver_id, name, face_encoding) VALUES (1, ?, ?)",
+                    (name, self.pending_registration_encoding)
                 )
                 new_child_id = cursor.lastrowid
-                
-                # Insert all collected embeddings
-                for emb_bytes in self.pending_registration_embeddings:
-                    cursor.execute(
-                        "INSERT INTO face_embeddings (child_id, embedding) VALUES (?, ?)",
-                        (new_child_id, emb_bytes)
-                    )
 
             self.is_registering = False
-            self.pending_registration_embeddings = []
+            self.pending_registration_encoding = None
 
             await event_bus.publish("profile.created", new_child_id)
             await event_bus.publish("tts.synthesize",
