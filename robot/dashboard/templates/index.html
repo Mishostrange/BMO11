@@ -225,6 +225,18 @@
 
 <main id="dashContent" style="display:none">
 
+  <!-- Vision Debugger -->
+  <div class="card" style="border-color: var(--primary);">
+    <h2 style="color: var(--primary);">Vision Debugger (Live)</h2>
+    <div style="display: flex; gap: 20px; flex-wrap: wrap;">
+      <div><strong>Engaged:</strong> <span id="vdEngaged">—</span></div>
+      <div><strong>Best Score:</strong> <span id="vdScore">—</span></div>
+    </div>
+    <div style="margin-top: 10px; font-family: monospace; font-size: 0.8rem; background: var(--bg); padding: 10px; border-radius: 8px;">
+      <pre id="vdFaces">No faces detected.</pre>
+    </div>
+  </div>
+
   <!-- KPI row -->
   <div class="card">
     <h2>Overview</h2>
@@ -495,6 +507,27 @@ function renderSessions(sessions) {
     </tr>`;
   }).join('');
 }
+
+// Polling Vision Debugger
+setInterval(async () => {
+  try {
+    const res = await fetch('/api/debug/vision');
+    if (!res.ok) return;
+    const data = await res.json();
+    
+    document.getElementById('vdEngaged').innerText = data.engaged ? "✅ YES" : "❌ NO";
+    document.getElementById('vdScore').innerText = data.score ? data.score.toFixed(1) : "0.0";
+    
+    if (data.faces_attention && data.faces_attention.length > 0) {
+      document.getElementById('vdFaces').innerText = JSON.stringify(data.faces_attention, null, 2);
+    } else {
+      document.getElementById('vdFaces').innerText = "No faces detected.";
+    }
+  } catch (e) {
+    // silently fail
+  }
+}, 1000); // poll every second
+
 </script>
 </body>
 </html>

@@ -4,7 +4,7 @@ from robot.database.connection import db
 from robot.database.schema import SCHEMA_SQL
 
 # Increment this whenever a new migration block is added below
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +103,22 @@ class DatabaseMigrator:
             
             cursor.execute("INSERT INTO schema_info (version) VALUES (5)")
             logger.info("Migration v5 applied.")
+
+        if current_version < 6:
+            logger.info("Applying migration v6: face_embeddings and last_seen")
+            cursor.connection.executescript("""
+                CREATE TABLE IF NOT EXISTS face_embeddings (
+                    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                    child_id            INTEGER NOT NULL REFERENCES children(id),
+                    embedding           BLOB NOT NULL,
+                    created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+            try: cursor.execute("ALTER TABLE children ADD COLUMN last_seen TIMESTAMP")
+            except Exception: pass
+            
+            cursor.execute("INSERT INTO schema_info (version) VALUES (6)")
+            logger.info("Migration v6 applied.")
 
     def _seed_initial_data(self, cursor):
         """Insert default data for a fresh database."""

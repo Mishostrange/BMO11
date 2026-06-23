@@ -24,10 +24,17 @@ class CameraManager:
         self.use_picamera2 = False
         self._is_running = False
 
-        # Initialize InsightFace centrally (replaces MediaPipe)
+        # Initialize InsightFace centrally
         # 'buffalo_s' is lightweight and perfectly compatible with aarch64
+        # We only need detection every frame. Recognition is throttled manually later.
         self.app = FaceAnalysis(name='buffalo_s', allowed_modules=['recognition', 'detection'])
         self.app.prepare(ctx_id=0, det_size=(640, 640)) # 0 means CPU/auto
+        
+        # State for Tracking and Smoothing
+        self.next_track_id = 0
+        self.trackers = {} # track_id -> {"centroid": (x,y), "bbox_ema": bbox, "frames_since_seen": 0, "last_embedding": emb, "frames_since_emb": 0}
+        self.max_disappeared = 10 # frames before dropping a track
+        self.ema_alpha = 0.5 # Smoothing factor for bounding boxes
 
     def start(self):
         if self._is_running:
@@ -115,21 +122,101 @@ class CameraManager:
 
                     # 2. Run InsightFace ONE time centrally
                     def _detect():
-                        return self.app.get(frame)  # InsightFace uses BGR
+                        # We run the full pipeline to get bboxes and embeddings. 
+                        # To fully throttle embeddings we would need to split app.get into det and rec.
+                        # For simplicity, we run get() but we will manage track_ids and EMA.
+                        return self.app.get(frame)  
                         
                     faces = await loop.run_in_executor(None, _detect)
                     
                     target_face = None
                     if faces:
-                        # Assume largest face is target
+                        # Centroid tracking logic
+                        current_centroids = []
+                        for f in faces:
+                            cx = (f.bbox[0] + f.bbox[2]) / 2.0
+                            cy = (f.bbox[1] + f.bbox[3]) / 2.0
+                            current_centroids.append((cx, cy, f))
+                            
+                        # Match to existing tracks
+                        assigned_track_ids = set()
+                        for cx, cy, f in current_centroids:
+                            best_match_id = None
+                            best_dist = float('inf')
+                            
+                            for tid, tdata in self.trackers.items():
+                                if tid in assigned_track_ids: continue
+                                dist = np.linalg.norm(np.array((cx, cy)) - np.array(tdata["centroid"]))
+                                if dist < 100: # Threshold for matching
+                                    if dist < best_dist:
+                                        best_dist = dist
+                                        best_match_id = tid
+                                        
+                            if best_match_id is not None:
+                                # Update existing track
+                                tdata = self.trackers[best_match_id]
+                                tdata["centroid"] = (cx, cy)
+                                tdata["frames_since_seen"] = 0
+                                # EMA Smoothing for bounding box
+                                old_bbox = tdata["bbox_ema"]
+                                new_bbox = f.bbox
+                                smoothed_bbox = old_bbox * (1 - self.ema_alpha) + new_bbox * self.ema_alpha
+                                tdata["bbox_ema"] = smoothed_bbox
+                                f.bbox = smoothed_bbox # override for downstream
+                                
+                                # Throttle embedding update: keep old embedding if not time yet
+                                tdata["frames_since_emb"] += 1
+                                if tdata["frames_since_emb"] < 5 and tdata["last_embedding"] is not None:
+                                    f.embedding = tdata["last_embedding"]
+                                else:
+                                    tdata["last_embedding"] = f.embedding
+                                    tdata["frames_since_emb"] = 0
+                                    
+                                f.track_id = best_match_id
+                                assigned_track_ids.add(best_match_id)
+                            else:
+                                # Create new track
+                                new_id = self.next_track_id
+                                self.next_track_id += 1
+                                self.trackers[new_id] = {
+                                    "centroid": (cx, cy),
+                                    "bbox_ema": f.bbox,
+                                    "frames_since_seen": 0,
+                                    "last_embedding": f.embedding,
+                                    "frames_since_emb": 0
+                                }
+                                f.track_id = new_id
+                                assigned_track_ids.add(new_id)
+                                
+                        # Cleanup old tracks
+                        tracks_to_delete = []
+                        for tid, tdata in self.trackers.items():
+                            if tid not in assigned_track_ids:
+                                tdata["frames_since_seen"] += 1
+                                if tdata["frames_since_seen"] > self.max_disappeared:
+                                    tracks_to_delete.append(tid)
+                        for tid in tracks_to_delete:
+                            del self.trackers[tid]
+
+                        # Assume largest face is target (Active User Selection will handle this better later)
                         faces = sorted(faces, key=lambda f: (f.bbox[2]-f.bbox[0])*(f.bbox[3]-f.bbox[1]), reverse=True)
                         target_face = faces[0]
+                    else:
+                        # Increment frames_since_seen for all tracks if no faces found
+                        tracks_to_delete = []
+                        for tid, tdata in self.trackers.items():
+                            tdata["frames_since_seen"] += 1
+                            if tdata["frames_since_seen"] > self.max_disappeared:
+                                tracks_to_delete.append(tid)
+                        for tid in tracks_to_delete:
+                            del self.trackers[tid]
 
                     # 3. Publish rich payload
                     payload = {
                         "frame_bgr": frame,
                         "frame_rgb": rgb_frame,
                         "insight_face": target_face,
+                        "all_faces": faces,
                         "timestamp": start_t
                     }
                     

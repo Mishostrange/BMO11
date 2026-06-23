@@ -68,7 +68,7 @@ class TherapyEngine:
         self.is_asleep = False
 
         # Decision engine thresholds
-        self._ENGAGE_LOW_THRESHOLD  = 0.3
+        self._ENGAGE_LOW_THRESHOLD  = 40.0  # Out of 100
         self._EMOTION_ACC_THRESHOLD = 0.5
         self._SOCIAL_ACC_THRESHOLD  = 0.5
 
@@ -152,14 +152,14 @@ class TherapyEngine:
 
         await event_bus.publish("tts.synthesize", greeting)
 
-    async def _on_face_unknown(self, _event: str, encoding_bytes: bytes):
+    async def _on_face_unknown(self, _event: str, payload: dict):
         """Triggered when an unknown face is seen for several seconds."""
         if not self.is_registering:
             if self.session_manager.active_session_id:
                 return
             logger.info("[TherapyEngine] Unknown face detected. Starting registration.")
             self.is_registering = True
-            self.pending_registration_encoding = encoding_bytes
+            self.pending_registration_embeddings = payload.get("embeddings", [])
             await event_bus.publish("tts.synthesize",
                 "Hello! I don't think we've met before. I'm BMO. What's your name?")
 
@@ -168,7 +168,7 @@ class TherapyEngine:
         self._last_speech_time = time.time()
 
         # ── Registration intercept ─────────────────────────────────────────────
-        if self.is_registering and self.pending_registration_encoding:
+        if self.is_registering and getattr(self, 'pending_registration_embeddings', None):
             await self._handle_registration(text)
             return
 
@@ -283,12 +283,10 @@ class TherapyEngine:
         soft_hint = ""
         if interaction_type != "comfort_mode":
             now = time.time()
-            speech_bonus = 0.5 if (now - self._last_speech_time < 5.0) else 0.0
-            composite_engagement = min(1.0, self._latest_attention + speech_bonus)
+            composite_engagement = self._latest_attention
 
             logger.info(
-                f"[Engagement] attention={self._latest_attention:.2f} "
-                f"speech_bonus={speech_bonus:.2f} composite={composite_engagement:.2f}"
+                f"[Engagement] attention={self._latest_attention:.1f} (0-100 scale)"
             )
 
             if composite_engagement < self._ENGAGE_LOW_THRESHOLD:
@@ -381,14 +379,22 @@ class TherapyEngine:
 
             from robot.database.connection import db
             with db.get_cursor() as cursor:
+                # Insert into children (without face_encoding blob)
                 cursor.execute(
-                    "INSERT INTO children (caregiver_id, name, face_encoding) VALUES (1, ?, ?)",
-                    (name, self.pending_registration_encoding)
+                    "INSERT INTO children (caregiver_id, name) VALUES (1, ?)",
+                    (name,)
                 )
                 new_child_id = cursor.lastrowid
+                
+                # Insert all collected embeddings
+                for emb_bytes in self.pending_registration_embeddings:
+                    cursor.execute(
+                        "INSERT INTO face_embeddings (child_id, embedding) VALUES (?, ?)",
+                        (new_child_id, emb_bytes)
+                    )
 
             self.is_registering = False
-            self.pending_registration_encoding = None
+            self.pending_registration_embeddings = []
 
             await event_bus.publish("profile.created", new_child_id)
             await event_bus.publish("tts.synthesize",
