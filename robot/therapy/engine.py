@@ -195,8 +195,9 @@ class TherapyEngine:
         if not self.session_manager.active_child_id:
             logger.info("[TherapyEngine] Speech received with no active session. Auto-starting default session.")
             await self.start_session(1)
-            
+
         child_id = self.session_manager.active_child_id or 1
+        logger.info(f"[TherapyEngine] Processing speech for child_id={child_id}: '{text[:60]}'")
 
         # ── STEP 1: IN_GAME delegation — checked before ALL shortcuts ─────────
         if self.game_orchestrator and self.game_orchestrator.is_game_active():
@@ -337,7 +338,7 @@ class TherapyEngine:
         messages = [{"role": "system", "content": system_prompt}]
         messages.extend(self.mem.get_recent_messages())
 
-        logger.debug(f"[TherapyEngine] Intent={interaction_type} Emotion={current_emotion} Frustration={frustration}")
+        logger.info(f"[TherapyEngine] Pipeline: text='{text[:50]}' intent={interaction_type} emotion={current_emotion} frustration={frustration}")
 
         # J. LLM call
         try:

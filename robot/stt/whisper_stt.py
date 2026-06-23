@@ -47,7 +47,7 @@ class FasterWhisperNode:
         "here is the game rule", "which game do you want"
     }
     MIN_AUDIO_DURATION_S = 0.8   # ignore clips shorter than 0.8s
-    MIN_RMS_ENERGY = 0.005        # ignore clips that are too quiet (background noise floor)
+    MIN_RMS_ENERGY = 0.002        # just above measured noise floor (0.0014-0.0015)
 
     async def _on_speech_ended(self, event_type: str, audio_data: np.ndarray):
         """Event handler for when VAD detects end of speech."""
@@ -82,12 +82,12 @@ class FasterWhisperNode:
                 
                 # 1. Exact match check
                 if clean_text in self.EXACT_HALLUCINATIONS:
-                    logger.debug(f"STT: Discarded exact hallucination: '{text}'")
+                    logger.info(f"STT: Hallucination filtered (exact match): '{text}'")
                     return
                 
                 # 2. Substring match check
                 if any(h in clean_text for h in self.HALLUCINATION_PATTERNS):
-                    logger.debug(f"STT: Discarded substring hallucination: '{text}'")
+                    logger.info(f"STT: Hallucination filtered (pattern match): '{text}'")
                     return
 
                 logger.info(f"User: {text}")
